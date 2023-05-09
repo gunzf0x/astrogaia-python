@@ -108,7 +108,7 @@ def checkPythonVersion() -> None:
     Since this script uses some functions defined only since Python 3.10, it is required to run. Otherwise it will throw an errors while running
     """
     if sys.version_info < (3,10):
-        print("{colors['L_RED']}[!] This script requires Python 3.10 (or higher) to run{colors['NC']}")
+        print("{colors['L_RED']}[!] This function requires Python 3.10 (or higher) to run{colors['NC']}")
         sys.exit(1)
     return
 
@@ -141,6 +141,21 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
     if args_provided.command == "plot" and args_provided.subcommand == "filter" and n_args_provided == 3:
         parser_provided.parse_args(['plot', 'filter', '-h'])
             
+
+def checkNameObjectProvidedByUser(name_object):
+    """
+    Checks if a user has provided a valid object name. For example, object name 'NGC104' is valid, '<NGC104>' is not. 
+    Also, 'NGC 104' is converted to 'NGC_104' for future functions/usage
+    """
+    pattern = r'^[\w ]+$'
+    name_to_test = name_object.replace(' ', '_')
+    pass_test = bool(re.match(pattern, name_object))
+    if pass_test:
+        return name_to_test
+    if not pass_test:
+        print("{warning} You have provided an invalid name (which may contain invalid characters): '{name_object}'")
+        sys.exit(1)
+
 
 #######################
 ## show gaia-content ##
@@ -274,33 +289,21 @@ def showGaiaContent(service_requested: str, table_format: str) -> None:
     # Print the obtained table
     print_table(body_table, headers_table, max_allowed_length, table_format)
 
-def checkNameObjectProvidedByUser(name_object):
-    """
-    Checks if a user has provided a valid object name. For example, object name 'NGC104' is valid, '<NGC104>' is not. 
-    Also, 'NGC 104' is converted to 'NGC_104' for future functions/usage
-    """
-    pattern = r'^[\w ]+$'
-    name_to_test = name_object.replace(' ', '_')
-    pass_test = bool(re.match(pattern, name_object))
-    if pass_test:
-        return name_to_test
-    if not pass_test:
-        print("{warning} You have provided an invalid name (which may contain invalid characters): '{name_object}'")
-        sys.exit(1)
-
 
 def main() -> None:
-    # Check if the user is using Python3.10 or higher, which is required for some functions
-    checkPythonVersion()
-
     # Parse the command-line arguments/get flags and their values provided by the user
     parser, args = parseArgs()
 
-    # Check that user has provided arguments, otherwise print help message
+    # Check that user has provided non-empty arguments, otherwise print help message
     checkUserHasProvidedArguments(parser, args, len(sys.argv))
 
+    # Check arguments provided and run their respective commands
     if args.command == 'show-gaia-content':
         showGaiaContent(args.gaia_release, args.table_format)
+
+    if args.command == 'extract'
+        # Check if the user is using Python3.10 or higher, which is required for this function
+        checkPythonVersion()
             
 
 
