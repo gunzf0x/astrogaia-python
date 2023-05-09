@@ -277,7 +277,6 @@ def showGaiaContent(service_requested: str, table_format: str) -> None:
         if isinstance(r[prop].info.description, type(None)):
             r[prop].info.description = "No description provided"
         
-        output += f"| {j} |{r[prop].info.name} | {r[prop].info.dtype} | {r[prop].info.unit} | {r[prop].info.description} |\n"
         output_list.append(f'{j+1} | {r[prop].info.name} | {r[prop].info.dtype} | {r[prop].info.unit} | {r[prop].info.description}')
 
     # To display the table first we need to get terminal width
