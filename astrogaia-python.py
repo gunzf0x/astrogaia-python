@@ -301,7 +301,7 @@ def main() -> None:
     if args.command == 'show-gaia-content':
         showGaiaContent(args.gaia_release, args.table_format)
 
-    if args.command == 'extract'
+    if args.command == 'extract':
         # Check if the user is using Python3.10 or higher, which is required for this function
         checkPythonVersion()
             
