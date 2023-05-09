@@ -24,7 +24,7 @@ colors = {
         }
 
 
-# Define a simple character to print steps
+# Define simple characters
 sb: str = f'{colors["L_CYAN"]}[*]{colors["NC"]}' # [*]
 sb_v2: str = f'{colors["RED"]}[{colors["YELLOW"]}+{colors["RED"]}]{colors["NC"]}' # [*]
 whitespaces: str = " "*(len(sb)+1) # '    '
@@ -124,6 +124,10 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
 
 
 def checkNameObjectProvidedByUser(name_object):
+    """
+    Checks if a user has provided a valid object name. For example, object name 'NGC104' is valid, '<NGC104>' is not. 
+    Also, 'NGC 104' is converted to 'NGC_104' for future functions/usage
+    """
     pattern = r'^[\w ]+$'
     name_to_test = name_object.replace(' ', '_')
     pass_test = bool(re.match(pattern, name_object))
