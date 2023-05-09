@@ -2,6 +2,14 @@
 
 import argparse
 import sys
+import logging
+import astropy.units as u
+from astropy.coordinates import SkyCoord
+from astroquery.gaia import Gaia
+import astroquery.utils.tap.core as tapcore
+from pwn import *
+import shutil
+from tabulate import tabulate
 
 # ANSI escape codes dictionary
 colors = {
@@ -79,6 +87,15 @@ def parseArgs():
     plot_subcommand_filter = parser_subcommand_plot.add_parser(str_plot_subcommand_filter)
     plot_subcommand_filter.add_argument("-n", "--name", help="Set a object name for the sample. Example: 'NGC104', 'my_sample'")
 
+
+    # Command 3: show-gaia-content
+    str_show_content_command: str = 'show-gaia-content'
+    show_content_command =  commands.add_parser(str_show_content_command, help="Show the type of content that different Gaia Releases can provide")
+    show_content_command.add_argument('-r', '--gaia-release', default='gdr3',
+                                      help="Select the Gaia Data Release you want to display what type of data contains. \
+                                            Valid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2}")
+    show_content_command.add_argument('-t', '--table-format', default='grid', 
+                                      help="Table display format (default='grid'). To check all formats available visit: https://pypi.org/project/tabulate/")
     
     # parse the command-line arguments
     args = parser.parse_args()
@@ -110,6 +127,9 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
 
     if args_provided.command == "plot" and args_provided.subcommand is None:
         parser_provided.parse_args(['plot', '-h'])
+    
+    if args_provided.command == 'show-gaia-content' and n_args_provided == 2:
+        parser_provided.parse_args(['show-gaia-content', '-h'])
 
     # If user has not provided any argument for the subcommand
     if args_provided.command == "extract" and args_provided.subcommand == "raw" and n_args_provided == 3:
@@ -122,6 +142,137 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
         parser_provided.parse_args(['plot', 'filter', '-h'])
             
 
+#######################
+## show gaia-content ##
+#######################
+def read_columns_in_gaia_table(output_list):
+    """
+    We saved each column separated by '|'. Now use that character to split every row into its respective columns
+    """
+    rows = []
+
+    for line in output_list:
+        col = []
+        row = line.strip().split("|")
+        for column in row:
+            col.append(column.strip())
+        rows.append(col)
+    return rows
+
+
+def create_table_elements(width_terminal, printable_data_rows_table):
+    """
+    Add colors to the table and sets their parts ready to be printed
+    """
+    # Headers for the table
+    headers_table = ["Row", "Name" ,"Var Type", "Unit", "Description"]
+    # Get the max length (the sum of them) for columns that are not the "Description column"
+    max_length = 0
+    # table_to_show = [[item for item in sublist[1:]] for sublist in printable_data_rows_table] 
+    table_to_show = [row for row in printable_data_rows_table]
+    for col in printable_data_rows_table:
+        new_length = len(col[0]) + len(col[1]) + len(col[2]) + len(col[3]) + 19 # '19' considering symbols and spaces
+        if new_length > max_length:
+            max_length = new_length
+    # Max allowed length before 'wrapping' text
+    max_allowed_length = width_terminal - max_length - 19
+
+    colors_headers_table = [f"{colors['L_CYAN']}Row{colors['NC']}",
+                            f"{colors['PINK']}Name{colors['NC']}",
+                            f"{colors['YELLOW']}Var Type{colors['NC']}",
+                            f"{colors['L_RED']}Units{colors['NC']}",
+                            f"{colors['L_GREEN']}Description{colors['NC']}"]
+    # Create a table body containing ANSI escape codes so it will print in colors
+    colors_row_table = []
+    for column_value in printable_data_rows_table:
+        color_column = []
+        # 'Row' column
+        color_column.append(f"{colors['CYAN']}{column_value[0]}{colors['NC']}")
+        # 'Name' column
+        color_column.append(f"{colors['PURPLE']}{column_value[1]}{colors['NC']}")
+        # 'Var Type' column
+        color_column.append(f"{colors['BROWN']}{column_value[2]}{colors['NC']}")
+        # 'Unit' column
+        color_column.append(f"{colors['RED']}{column_value[3]}{colors['NC']}")
+        # 'Description' column
+        color_column.append(f"{colors['GREEN']}{column_value[4]}{colors['NC']}")
+        colors_row_table.append(color_column)
+    return colors_headers_table, colors_row_table, max_allowed_length
+
+
+def print_table(body_table, headers_table, max_allowed_length, table_format):
+    """
+    Print the final table/result
+    """
+    print()
+    print(tabulate(body_table, 
+          headers=headers_table, tablefmt=table_format, 
+          maxcolwidths=[None, None, None, None, max_allowed_length]))
+
+
+def showGaiaContent(service_requested: str, table_format: str) -> None:
+    """
+    Get columns to display for GaiaDR3, GaiaEDR3 or GaiaDR2
+    """
+    # Check the service the user wants to use
+    service_requested = service_requested.lower()
+    if 'gaiadr3' in service_requested or 'gdr3' in service_requested:
+        service = 'gaiadr3.gaia_source'
+    elif 'gaiaedr3' in service_requested or 'gedr3' in service_requested:
+        service = 'gaiaedr3.gaia_source'
+    elif 'gaiadr2' in service_requested or 'gdr2' in service_requested:
+        service = 'gaiadr2.gaia_source'
+    else:
+        print(f"The service you provided is not valid ('{service_requested}'). Using 'GaiaDR3' (default)...")
+        service = 'gaiadr3.gaia_source'
+
+    ### Get data via Astroquery
+    Gaia.MAIN_GAIA_TABLE = service # Select data to the requested service
+    Gaia.ROW_LIMIT = 1 # Just get 1 item since we are just interested in its columns
+
+    p = log.progress(f'{colors["L_GREEN"]}Requesting data')
+    logging.getLogger('astroquery').setLevel(logging.WARNING)
+
+    try:
+        p.status(f"{colors['PURPLE']}Querying table for '{service.replace('.gaia_source', '')}' service...{colors['NC']}")
+        # Make a random request to the service, just to obtain the values of the table
+        coord = SkyCoord(ra=280, dec=-60, unit=(u.degree, u.degree), frame='icrs')
+        radius = u.Quantity(1.0, u.deg)
+        j = Gaia.cone_search_async(coord, radius)
+        logging.getLogger('astroquery').setLevel(logging.INFO)
+    except:
+        p.failure(f"{colors['RED']}Error while requesting data. Check your internet connection is stable and retry...{colors['NC']}")
+        sys.exit(1)
+
+    p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
+    # Get the final data to display its columns as a table
+    r = j.get_results()
+    output = ""
+    output_list = []
+    # Clean the data
+    for j in range(0, len(r.colnames)):
+        prop = r.colnames[j]
+        # Set a value for 'unknown'/not set units
+        if r[prop].info.unit == None:
+            r[prop].info.unit = "-"
+        # Clean '{\rm}', '$' and '}' characters from output
+        if isinstance(r[prop].info.description, str):
+            r[prop].info.description = r[prop].info.description.replace('$', '').replace('{\\rm','').replace("}",'')
+        # If no description is provided, say it
+        if isinstance(r[prop].info.description, type(None)):
+            r[prop].info.description = "No description provided"
+        
+        output += f"| {j} |{r[prop].info.name} | {r[prop].info.dtype} | {r[prop].info.unit} | {r[prop].info.description} |\n"
+        output_list.append(f'{j+1} | {r[prop].info.name} | {r[prop].info.dtype} | {r[prop].info.unit} | {r[prop].info.description}')
+
+    # To display the table first we need to get terminal width
+    width = shutil.get_terminal_size()[0]
+    # Get the data for the table (an array where every element is a row of the table)
+    printable_data_table = read_columns_in_gaia_table(output_list)
+    # Create table body that will be printed
+    headers_table, body_table, max_allowed_length = create_table_elements(width, printable_data_table)
+    # Print the obtained table
+    print_table(body_table, headers_table, max_allowed_length, table_format)
 
 def checkNameObjectProvidedByUser(name_object):
     """
@@ -147,6 +298,10 @@ def main() -> None:
 
     # Check that user has provided arguments, otherwise print help message
     checkUserHasProvidedArguments(parser, args, len(sys.argv))
+
+    if args.command == 'show-gaia-content':
+        showGaiaContent(args.gaia_release, args.table_format)
+            
 
 
 if __name__ == "__main__":
