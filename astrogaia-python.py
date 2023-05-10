@@ -158,7 +158,7 @@ def checkNameObjectProvidedByUser(name_object):
 
 
 #######################
-## show gaia-content ##
+## show-gaia-content ##
 #######################
 def read_columns_in_gaia_table(output_list):
     """
