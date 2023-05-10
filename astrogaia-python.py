@@ -183,14 +183,14 @@ def create_table_elements(width_terminal, printable_data_rows_table):
     headers_table = ["Row", "Name" ,"Var Type", "Unit", "Description"]
     # Get the max length (the sum of them) for columns that are not the "Description column"
     max_length = 0
-    # table_to_show = [[item for item in sublist[1:]] for sublist in printable_data_rows_table] 
+    extra_gap = 19
     table_to_show = [row for row in printable_data_rows_table]
     for col in printable_data_rows_table:
-        new_length = len(col[0]) + len(col[1]) + len(col[2]) + len(col[3]) + 19 # '19' considering symbols and spaces
+        new_length = len(col[0]) + len(col[1]) + len(col[2]) + len(col[3]) + extra_gap 
         if new_length > max_length:
             max_length = new_length
     # Max allowed length before 'wrapping' text
-    max_allowed_length = width_terminal - max_length - 19
+    max_allowed_length = width_terminal - max_length - extra_gap
 
     colors_headers_table = [f"{colors['L_CYAN']}Row{colors['NC']}",
                             f"{colors['PINK']}Name{colors['NC']}",
@@ -224,12 +224,10 @@ def print_table(body_table, headers_table, max_allowed_length, table_format):
           headers=headers_table, tablefmt=table_format, 
           maxcolwidths=[None, None, None, None, max_allowed_length]))
 
-
-def showGaiaContent(service_requested: str, table_format: str) -> None:
+def select_gaia_astroquery_service(service_requested: str) -> str:
     """
-    Get columns to display for GaiaDR3, GaiaEDR3 or GaiaDR2
+    Check the service the user wants to use
     """
-    # Check the service the user wants to use
     service_requested = service_requested.lower()
     if 'gaiadr3' in service_requested or 'gdr3' in service_requested:
         service = 'gaiadr3.gaia_source'
@@ -240,19 +238,26 @@ def showGaiaContent(service_requested: str, table_format: str) -> None:
     else:
         print(f"The service you provided is not valid ('{service_requested}'). Using 'GaiaDR3' (default)...")
         service = 'gaiadr3.gaia_source'
+    return service
+    
 
+def get_data_via_astroquery(input_service, input_ra, input_dec, input_radius, 
+                            coords_units, radius_units, input_rows):
+    """
+    Get data applying a query to Astroquery
+    """
     ### Get data via Astroquery
-    Gaia.MAIN_GAIA_TABLE = service # Select data to the requested service
-    Gaia.ROW_LIMIT = 1 # Just get 1 item since we are just interested in its columns
-
+    print(f"service {input_service} input_ra {input_ra} input_dec {input_dec} input_radius {input_radius} coords_units {coords_units} radius_units {radius_units} input_rows {input_rows}")
+    Gaia.MAIN_GAIA_TABLE = input_service 
+    Gaia.ROW_LIMIT = input_rows 
     p = log.progress(f'{colors["L_GREEN"]}Requesting data')
     logging.getLogger('astroquery').setLevel(logging.WARNING)
 
+    # Make request to the service
     try:
-        p.status(f"{colors['PURPLE']}Querying table for '{service.replace('.gaia_source', '')}' service...{colors['NC']}")
-        # Make a random request to the service, just to obtain the values of the table
-        coord = SkyCoord(ra=280, dec=-60, unit=(u.degree, u.degree), frame='icrs')
-        radius = u.Quantity(1.0, u.deg)
+        p.status(f"{colors['PURPLE']}Querying table for '{input_service.replace('.gaia_source', '')}' service...{colors['NC']}")
+        coord = SkyCoord(ra=input_ra, dec=input_dec, unit=(coords_units, coords_units), frame='icrs')
+        radius = u.Quantity(input_radius, radius_units)
         j = Gaia.cone_search_async(coord, radius)
         logging.getLogger('astroquery').setLevel(logging.INFO)
     except:
@@ -262,23 +267,46 @@ def showGaiaContent(service_requested: str, table_format: str) -> None:
     p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
     # Get the final data to display its columns as a table
     r = j.get_results()
+    return r 
+    
+
+def get_content_table_to_display(data):
+    """
+    Get the content obtained via Astroquery and set it into a table-readable format, replacing some invalid/null values
+    """
     output = ""
     output_list = []
     # Clean the data
-    for j in range(0, len(r.colnames)):
-        prop = r.colnames[j]
+    for j in range(0, len(data.colnames)):
+        prop = data.colnames[j]
         # Set a value for 'unknown'/not set units
-        if r[prop].info.unit == None:
-            r[prop].info.unit = "-"
+        if data[prop].info.unit == None:
+            data[prop].info.unit = "-"
         # Clean '{\rm}', '$' and '}' characters from output
-        if isinstance(r[prop].info.description, str):
-            r[prop].info.description = r[prop].info.description.replace('$', '').replace('{\\rm','').replace("}",'')
+        if isinstance(data[prop].info.description, str):
+            data[prop].info.description = data[prop].info.description.replace('$', '').replace('{\\rm','').replace("}",'')
         # If no description is provided, say it
-        if isinstance(r[prop].info.description, type(None)):
-            r[prop].info.description = "No description provided"
+        if isinstance(data[prop].info.description, type(None)):
+            data[prop].info.description = "No description provided"
         
-        output_list.append(f'{j+1} | {r[prop].info.name} | {r[prop].info.dtype} | {r[prop].info.unit} | {r[prop].info.description}')
+        output_list.append(f'{j+1} | {data[prop].info.name} | {data[prop].info.dtype} | {data[prop].info.unit} | {data[prop].info.description}')
+    return output_list
 
+
+
+def showGaiaContent(args) -> None:
+    """
+    Get columns to display for GaiaDR3, GaiaEDR3 or GaiaDR2
+    """
+    # Get arguments
+    service_requested = args.gaia_release
+    table_format = args.table_format
+    # Get which service the user wants to use
+    service = select_gaia_astroquery_service(service_requested)
+    # Get an example data
+    data = get_data_via_astroquery(service, 280, -60, 1.0, u.degree, u.deg, 1)
+    # Get the data into a table format
+    output_list = get_content_table_to_display(data)
     # To display the table first we need to get terminal width
     width = shutil.get_terminal_size()[0]
     # Get the data for the table (an array where every element is a row of the table)
@@ -297,14 +325,16 @@ def main() -> None:
     checkUserHasProvidedArguments(parser, args, len(sys.argv))
 
     # Check arguments provided and run their respective commands
-    if args.command == 'show-gaia-content':
-        showGaiaContent(args.gaia_release, args.table_format)
 
+    # Run 'show-gaia-content' command
+    if args.command == 'show-gaia-content':
+        showGaiaContent(args)
+
+    # Run 'extract' command
     if args.command == 'extract':
         # Check if the user is using Python3.10 or higher, which is required for this function
         checkPythonVersion()
             
-
 
 if __name__ == "__main__":
     main()
