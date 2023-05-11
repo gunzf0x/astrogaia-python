@@ -10,6 +10,10 @@ import astroquery.utils.tap.core as tapcore
 from pwn import *
 import shutil
 from tabulate import tabulate
+import random
+import matplotlib.pyplot as plt
+from astropy.coordinates.name_resolve import NameResolveError as ResolveError
+
 
 # ANSI escape codes dictionary
 colors = {
@@ -30,7 +34,7 @@ colors = {
         "L_CYAN": '\033[1;36m',
         "NC": '\033[0m'
         }
-
+script_version = 'v1.0.0'
 
 # Define simple characters
 sb: str = f'{colors["L_CYAN"]}[*]{colors["NC"]}' # [*]
@@ -49,48 +53,92 @@ def parseArgs():
     general_description += f"{colors['L_GREEN']}Contact: {colors['GREEN']}Francisco Carrasco Varela \
                              (ffcarrasco@uc.cl) ⭐{colors['NC']}"
 
-    parser = argparse.ArgumentParser(description=f"{general_description}")
+    parser = argparse.ArgumentParser(description=f"{general_description}", epilog=f"example: {sys.argv[0]} extract")
 
     # Define commands
     commands = parser.add_subparsers(dest='command')
 
-    # Command 1: extract -- Extract data from Gaia Archive
+    ### 'extract' command
     str_extract_command: str = 'extract'
-    extract_command = commands.add_parser(str_extract_command, help='Extract data from Gaia Archive')
-    # main command
+    extract_command = commands.add_parser(str_extract_command, help=f'{colors["RED"]}Different modes to extract data{colors["NC"]}', 
+                    description=f'{colors["L_RED"]}Extract data from Gaia{colors["NC"]}', epilog=f"example: {sys.argv[0]} extract raw")
+    parser_sub_extract = extract_command.add_subparsers(dest='subcommand', 
+                                                        help=f"{colors['RED']}Select the source/method to extract data{colors['NC']}")
 
     # Sub-command extract - raw
-    extract_raw_subcommand_help = f"{colors['RED']}Extract raw data from Gaia DR3 archive without any filter{colors['NC']}"
-    parser_sub_extract = extract_command.add_subparsers(dest='subcommand', help=extract_raw_subcommand_help)
-
     str_extract_subcommand_raw: str = 'raw'
-    extract_subcommand_raw = parser_sub_extract.add_parser(str_extract_subcommand_raw, description=extract_raw_subcommand_help)
-    extract_subcommand_raw.add_argument('-f', '--file', help="some file")
-    extract_subcommand_raw.add_argument('-o', '--output', help="Some output")
+    extract_raw_subcommand_help = f"{colors['L_RED']}Extract raw Gaia data directly from Archive{colors['NC']}"
+    extract_subcommand_raw = parser_sub_extract.add_parser(str_extract_subcommand_raw, description=extract_raw_subcommand_help,
+                                                           help=f"{colors['RED']}Extract raw Gaia data directly from Archive{colors['NC']}",
+                                                           epilog=f"example: {sys.argv[0]} extract raw rectangle")
+    # Sub-subcommand: extract - raw - cone
+    extract_raw_cone_subsubcommand_help = f"{colors['RED']}Extract data in 'cone search' mode{colors['NC']}"
+    parser_sub_extract_raw = extract_subcommand_raw.add_subparsers(dest='subsubcommand', help=f"{colors['RED']}Shape to extract data{colors['NC']}")
 
-    # Command 2: plot -- Plot data
+    str_extract_subcommand_raw_subsubcommand_cone = 'cone'
+    str_extract_subcommand_raw_subsubcommand_cone_examples = rf'''examples: {sys.argv[0]} extract raw cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
+            {sys.argv[0]} extract raw cone -ra "210" -dec "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, buy you have to provide coords{colors["NC"]}
+
+    '''
+    epilog_str = rf'''examples: {sys.argv[0]} extract raw cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
+          {sys.argv[0]} extract raw cone -ra "210" -dec "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, but you have to provide coords{colors["NC"]}
+'''
+    extract_subcommand_raw_subsubcommand_cone = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_cone,
+                                                                          help=f"{colors['RED']}Extract data in 'cone search' mode{colors['NC']}",
+                                                                          description=f"{colors['L_RED']}Extract data in 'code search' mode{colors['NC']}",
+                                                                          epilog=epilog_str, formatter_class=argparse.RawTextHelpFormatter)
+    extract_subcommand_raw_subsubcommand_cone.add_argument('-n', '--name', type=str, required=True,
+                                                           help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('-r', '--radii', type=float, required=True,
+                                                           help="Radius to extract data. Default units: degrees")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--right-ascension', type=str,
+                                                           help="Right ascension J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--declination', type=str,
+                                                           help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('-o', '--outfile', type=str,
+                                                           help="Output filename to save data")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--file-extension', type=str, default="dat",
+                                                           help="Extension for the output file")
+
+    # Sub-subcommand: extract - raw - rectangle
+    str_extract_subcommand_raw_subsubcommand_rect = 'rectangle'
+    extract_subcommand_raw_subsubcommand_rect_example = f"example: {sys.argv[0]} extract raw rectangle -ra '210' -dec '-60' -r 6.5"
+    extract_subcommand_raw_subsubcommand_rect = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_rect,
+                                                                                  help=f"{colors['RED']}Extract data in 'rectangle search' mode{colors['NC']}",
+                                                                                  description=f"{colors['L_RED']}Extract data in rectangle shape{colors['NC']}",
+                                                                                  epilog=f"example: {sys.argv[0]} extract raw rectangle ")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-f', '--file', help="some file")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-o', '--out', help="output file")
+
+    ### 'plot' command
     str_plot_command: str = 'plot'
-    plot_command = commands.add_parser(str_plot_command, help="Plot data")
+    plot_command = commands.add_parser(str_plot_command, help=f"{colors['GREEN']}Plot data{colors['NC']}")
 
     # Sub-command plot -> raw -- Plot data without any filter
-    parser_subcommand_plot = plot_command.add_subparsers(dest='subcommand', help="Extract raw data from Gaia DR3 archive and plot it given a point (center) and a radius")
+    parser_subcommand_plot = plot_command.add_subparsers(dest='subcommand', help="Different modes to plot Gaia data")
 
     str_plot_subcommand_raw: str = 'raw'
-    plot_subcommand_raw = parser_subcommand_plot.add_parser(str_plot_subcommand_raw)
+    plot_subcommand_raw = parser_subcommand_plot.add_parser(str_plot_subcommand_raw,
+                                                            help='Plot data directly extracted from Gaia Archive',
+                                                            description=f'{colors["L_RED"]}Plot data directly extracted from Gaia Archive{colors["NC"]}')
     plot_subcommand_raw.add_argument('-n', '--name', help="Set a object name for the sample. Example: 'NGC104', 'my_sample'")
     plot_subcommand_raw.add_argument('-ra', "--right-ascension", help="Right Ascension (J2000) for the center of data")
     plot_subcommand_raw.add_argument('-dec', "--declination", help="Declination (J2000) for the center of data")
     plot_subcommand_raw.add_argument('-r', "--radii", help="Radius for the data centered in (RA, DEC) flags in arcmin")
+    plot_subcommand_raw.add_argument('--ra-units', default="degree", type=str,  
+                                      help="Specify the units to use based on 'astropy' (default: degree). Options: {deg, }")
     
     # Sub-command plot -> filter -- Plot data filtered
-    str_plot_subcommand_filter : str = "filter"
-    plot_subcommand_filter = parser_subcommand_plot.add_parser(str_plot_subcommand_filter)
+    str_plot_subcommand_filter : str = "from-file"
+    plot_subcommand_filter = parser_subcommand_plot.add_parser(str_plot_subcommand_filter, 
+                                                               help=f"Plot data from a file containing Gaia data")
     plot_subcommand_filter.add_argument("-n", "--name", help="Set a object name for the sample. Example: 'NGC104', 'my_sample'")
 
 
-    # Command 3: show-gaia-content
+    ### 'show-gaia-content' command
     str_show_content_command: str = 'show-gaia-content'
-    show_content_command =  commands.add_parser(str_show_content_command, help="Show the type of content that different Gaia Releases can provide")
+    show_content_command =  commands.add_parser(str_show_content_command, 
+                                                help=f"{colors['BROWN']}Show the type of content that different Gaia Releases can provide{colors['NC']}")
     show_content_command.add_argument('-r', '--gaia-release', default='gdr3',
                                       help="Select the Gaia Data Release you want to display what type of data contains. \
                                             Valid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2}")
@@ -119,27 +167,29 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
     """
     # If user has not provided a command
     if args_provided.command is None:
-        parser_provided.print_help()
+        parser_provided.parse_args(['-h'])
 
     # If user has not provided a subcommand  
     if args_provided.command == "extract" and args_provided.subcommand is None:
         parser_provided.parse_args(['extract', '-h'])
 
-    if args_provided.command == "plot" and args_provided.subcommand is None:
-        parser_provided.parse_args(['plot', '-h'])
     
-    if args_provided.command == 'show-gaia-content' and n_args_provided == 2:
-        parser_provided.parse_args(['show-gaia-content', '-h'])
-
     # If user has not provided any argument for the subcommand
     if args_provided.command == "extract" and args_provided.subcommand == "raw" and n_args_provided == 3:
         parser_provided.parse_args(['extract', 'raw', '-h'])
 
+
+    if args_provided.command == "extract" and args_provided.subcommand == "raw" and args_provided.subsubcommand=="rectangle" and n_args_provided == 4:
+        parser_provided.parse_args(['extract', 'raw', 'rectangle', '-h'])
+
+    if args_provided.command == "plot" and args_provided.subcommand is None:
+        parser_provided.parse_args(['plot', '-h'])
+
     if args_provided.command == "plot" and args_provided.subcommand == "raw" and n_args_provided == 3:
         parser_provided.parse_args(['plot', 'raw', '-h'])
 
-    if args_provided.command == "plot" and args_provided.subcommand == "filter" and n_args_provided == 3:
-        parser_provided.parse_args(['plot', 'filter', '-h'])
+    if args_provided.command == "plot" and args_provided.subcommand == "from-file" and n_args_provided == 3:
+        parser_provided.parse_args(['plot', 'from-file', '-h'])
             
 
 def checkNameObjectProvidedByUser(name_object):
@@ -155,6 +205,77 @@ def checkNameObjectProvidedByUser(name_object):
     if not pass_test:
         print("{warning} You have provided an invalid name (which may contain invalid characters): '{name_object}'")
         sys.exit(1)
+
+
+def printBanner() -> None:
+    # Color 1
+    rand_number = random.randint(31,36) 
+    c = f'\033[1;{rand_number}m' # color
+    sh = f'\033[{rand_number}m' # shadow
+    nc = colors['NC'] # no color / reset color
+    # Color 2
+    rand_number2 = random.randint(31,36) 
+    c2 = f'\033[1;{rand_number2}m' # color
+    sh2 = f'\033[{rand_number2}m' # shadow
+
+    banner = rf'''   {c}_____            __{nc}                  
+ {c} /  {sh}_  {c}\   _______/  |________  ____{nc}  
+{c} /  {sh}/_\  {c}\ /  ___/\   __\_  __ \/  {sh}_ {c}\{nc}  
+{c}/    |    \\___ \  |  |  |  | \(  {sh}<_> {c}){nc} 
+{c}\____|__  /____  > |__|  |__|   \____/{nc} 
+{c}        \/     \/{nc}                      
+{c2}      ________        __{nc}                   
+{c2}     /  _____/_____  |__|____{nc}              
+{c2}    /   \  ___\__  \ |  \__  \{nc}             
+{c2}    \    \_\  \/ {sh2}__ {c2}\|  |/ {sh2}__ {c2}\_{nc}            
+{c2}     \______  (____  /__(____  /{nc}           
+{c2}            \/     \/        \/{nc} {colors['GRAY']} {script_version}{nc}
+    '''
+    print(banner)
+    print(f"\n{' ' * 11}by {colors['L_CYAN']}Francisco Carrasco Varela{colors['NC']}")
+    print(f"{' ' * 21}{colors['CYAN']}(ffcarrasco@uc.cl){colors['NC']}")
+    return
+
+
+def displaySections(text, color_chosen=colors['NC'], character='#'):
+    """
+    Displays a section based on the user option/command
+    """
+    # Get the user's terminal width and compute its half size
+    terminal_width = shutil.get_terminal_size().columns
+    total_width = terminal_width // 2
+    text_width = len(text) + 2
+    padding_width = (total_width - text_width) // 2
+    left_padding_width = padding_width
+    right_padding_width = padding_width
+    # If the number of characters is odd, add 1 extra character to readjust the size
+    if (total_width - text_width) % 2 == 1:
+        right_padding_width += 1
+    left_padding = character * left_padding_width
+    right_padding = character * right_padding_width
+    # Create the text to display
+    centered_text = f"{left_padding} {color_chosen}{text}{colors['NC']} {right_padding}"
+    border = character * total_width
+    # Print the result
+    print(f"\n{border}\n{centered_text}\n{border}\n")
+
+
+def randomColor() -> str:
+    """
+    Select a random color for text
+    """
+    return f'\033[{random.randint(31,36)}m'
+
+
+def randomChar() -> str:
+    """
+    Select a random character to be printed
+    """
+    char_list = ['#', '=', '+', '$', '@']
+    # 80% to pick '#', 20% remaining distributed for other characters
+    weight_list = [0.8, 0.05, 0.05, 0.05, 0.05]
+    return random.choices(char_list, weights=weight_list,k=1)[0]
+
 
 
 #######################
@@ -247,7 +368,6 @@ def get_data_via_astroquery(input_service, input_ra, input_dec, input_radius,
     Get data applying a query to Astroquery
     """
     ### Get data via Astroquery
-    print(f"service {input_service} input_ra {input_ra} input_dec {input_dec} input_radius {input_radius} coords_units {coords_units} radius_units {radius_units} input_rows {input_rows}")
     Gaia.MAIN_GAIA_TABLE = input_service 
     Gaia.ROW_LIMIT = input_rows 
     p = log.progress(f'{colors["L_GREEN"]}Requesting data')
@@ -293,11 +413,11 @@ def get_content_table_to_display(data):
     return output_list
 
 
-
 def showGaiaContent(args) -> None:
     """
     Get columns to display for GaiaDR3, GaiaEDR3 or GaiaDR2
     """
+    displaySections('show-gaia-content', randomColor(), randomChar())
     # Get arguments
     service_requested = args.gaia_release
     table_format = args.table_format
@@ -317,6 +437,77 @@ def showGaiaContent(args) -> None:
     print_table(body_table, headers_table, max_allowed_length, table_format)
 
 
+####################
+##### extract ######
+####################
+
+def get_object_coordinates(object_name):
+    """
+    Get the coordinates using service from Strasbourg astronomical Data Center (http://cdsweb.u-strasbg.fr)
+    """
+
+    p = log.progress(f"{colors['L_GREEN']}Object coordinates{colors['NC']}")
+    try:
+        p.status(f"{colors['GREEN']}Attempting to extract coordinates for your object...{colors['NC']}")
+        # Use the SkyCoord.from_name() function to get the coordinates
+        object_coord = SkyCoord.from_name(object_name)
+        found_object = True
+
+    except ResolveError:
+        p.failure(f"{colors['RED']}Could not find coordinates for object '{object_name}'{colors['NC']}")
+        found_object = False
+        return None, found_object
+    p.success("Coords extracted!")
+
+    return object_coord, found_object
+
+
+def decide_coords(args):
+    """
+    Based if the object provided by the user was found or not, decide what coordinates the program will use
+    """
+    object_coordinates, found_object = get_object_coordinates(args.name)
+    if found_object:
+        return object_coordinates.ra, object_coordinates.dec
+    if not found_object:
+        # Check if the user has provided parameters so we can extract the coordinates manually
+        if args.right_ascension is None:
+            print(f"{warning}{colors['RED']} Invalid object name ('{args.name}') and Right Ascension not provided ('--right-ascension')")
+            sys.exit(1)
+        if args.declination is None:
+            print(f"{warning}{colors['RED']} Invalid object name ('{args.name}') and Declination not provided ('--declination')")
+            sys.exit(1)
+        # If the user has provided coordinates, use them
+
+            
+
+
+
+
+def extractCommand(args):
+    # 'raw' subcommand
+    if args.subcommand == "raw":
+        # 'cone' subcommand
+        if args.subsubcommand == "cone":
+            RA, DEC = decide_coords(args)
+
+
+####################
+####### plot #######
+####################
+
+def plot_rawSubcommand(args):
+    return
+    
+
+def plotCommand(args) -> None:
+    """
+    Plot data
+    """
+    if args.subcommand == 'raw':
+        pass
+    return
+
 def main() -> None:
     # Parse the command-line arguments/get flags and their values provided by the user
     parser, args = parseArgs()
@@ -324,7 +515,7 @@ def main() -> None:
     # Check that user has provided non-empty arguments, otherwise print help message
     checkUserHasProvidedArguments(parser, args, len(sys.argv))
 
-    # Check arguments provided and run their respective commands
+    printBanner()
 
     # Run 'show-gaia-content' command
     if args.command == 'show-gaia-content':
@@ -334,7 +525,12 @@ def main() -> None:
     if args.command == 'extract':
         # Check if the user is using Python3.10 or higher, which is required for this function
         checkPythonVersion()
-            
+        extractCommand(args)
+
+
+    if args.command == 'plot':
+        plotCommand(args)
+        
 
 if __name__ == "__main__":
     main()
