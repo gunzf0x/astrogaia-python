@@ -6,13 +6,18 @@ import logging
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astroquery.gaia import Gaia
+from astropy.coordinates.name_resolve import NameResolveError
+from astropy.units.core import UnitsError
+from astropy.coordinates import Angle
 import astroquery.utils.tap.core as tapcore
 from pwn import *
 import shutil
 from tabulate import tabulate
 import random
 import matplotlib.pyplot as plt
-from astropy.coordinates.name_resolve import NameResolveError as ResolveError
+
+from dataclasses import dataclass
+import requests
 
 
 # ANSI escape codes dictionary
@@ -76,17 +81,14 @@ def parseArgs():
     parser_sub_extract_raw = extract_subcommand_raw.add_subparsers(dest='subsubcommand', help=f"{colors['RED']}Shape to extract data{colors['NC']}")
 
     str_extract_subcommand_raw_subsubcommand_cone = 'cone'
-    str_extract_subcommand_raw_subsubcommand_cone_examples = rf'''examples: {sys.argv[0]} extract raw cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
-            {sys.argv[0]} extract raw cone -ra "210" -dec "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, buy you have to provide coords{colors["NC"]}
-
-    '''
-    epilog_str = rf'''examples: {sys.argv[0]} extract raw cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
-          {sys.argv[0]} extract raw cone -ra "210" -dec "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, but you have to provide coords{colors["NC"]}
+    epilog_str_extract_raw_cone_example = rf'''examples: {sys.argv[0]} extract raw cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
+          {sys.argv[0]} extract raw cone --right-ascension "210" --declination "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, but you have to provide coords{colors["NC"]}
+          {sys.argv[0]} extract raw cone --right-ascension="20h50m45.7s" --declination="-5d23m33.3s" -r=3.3 {colors["GRAY"]}# Search for negative coordinates{colors["NC"]}
 '''
     extract_subcommand_raw_subsubcommand_cone = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_cone,
                                                                           help=f"{colors['RED']}Extract data in 'cone search' mode{colors['NC']}",
                                                                           description=f"{colors['L_RED']}Extract data in 'code search' mode{colors['NC']}",
-                                                                          epilog=epilog_str, formatter_class=argparse.RawTextHelpFormatter)
+                                                                          epilog=epilog_str_extract_raw_cone_example, formatter_class=argparse.RawTextHelpFormatter)
     extract_subcommand_raw_subsubcommand_cone.add_argument('-n', '--name', type=str, required=True,
                                                            help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-r', '--radii', type=float, required=True,
@@ -99,6 +101,7 @@ def parseArgs():
                                                            help="Output filename to save data")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--file-extension', type=str, default="dat",
                                                            help="Extension for the output file")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
 
     # Sub-subcommand: extract - raw - rectangle
     str_extract_subcommand_raw_subsubcommand_rect = 'rectangle'
@@ -233,7 +236,7 @@ def printBanner() -> None:
     '''
     print(banner)
     print(f"\n{' ' * 11}by {colors['L_CYAN']}Francisco Carrasco Varela{colors['NC']}")
-    print(f"{' ' * 21}{colors['CYAN']}(ffcarrasco@uc.cl){colors['NC']}")
+    print(f"{' ' * 21}{colors['CYAN']}(ffcarrasco@uc.cl){colors['NC']}\n\n")
     return
 
 
@@ -362,10 +365,10 @@ def select_gaia_astroquery_service(service_requested: str) -> str:
     return service
     
 
-def get_data_via_astroquery(input_service, input_ra, input_dec, input_radius, 
-                            coords_units, radius_units, input_rows):
+def get_data_via_astroquery_cone(input_service, input_ra, input_dec, input_radius, 
+                                 coords_units, radius_units, input_rows):
     """
-    Get data applying a query to Astroquery
+    Get data applying a query to Astroquery using "cone search"
     """
     ### Get data via Astroquery
     Gaia.MAIN_GAIA_TABLE = input_service 
@@ -378,7 +381,7 @@ def get_data_via_astroquery(input_service, input_ra, input_dec, input_radius,
         p.status(f"{colors['PURPLE']}Querying table for '{input_service.replace('.gaia_source', '')}' service...{colors['NC']}")
         coord = SkyCoord(ra=input_ra, dec=input_dec, unit=(coords_units, coords_units), frame='icrs')
         radius = u.Quantity(input_radius, radius_units)
-        j = Gaia.cone_search_async(coord, radius)
+        j = Gaia.cone_search_async(coord, radius)         
         logging.getLogger('astroquery').setLevel(logging.INFO)
     except:
         p.failure(f"{colors['RED']}Error while requesting data. Check your internet connection is stable and retry...{colors['NC']}")
@@ -388,6 +391,15 @@ def get_data_via_astroquery(input_service, input_ra, input_dec, input_radius,
     # Get the final data to display its columns as a table
     r = j.get_results()
     return r 
+
+
+def get_data_via_astroquery_rect(input_service, input_ra, input_dec, input_width, input_height, 
+                                 coords_units, radius_units, input_rows):
+    """
+    Get data applying a query to Astroquery using "cone search"
+    """
+
+
     
 
 def get_content_table_to_display(data):
@@ -424,7 +436,7 @@ def showGaiaContent(args) -> None:
     # Get which service the user wants to use
     service = select_gaia_astroquery_service(service_requested)
     # Get an example data
-    data = get_data_via_astroquery(service, 280, -60, 1.0, u.degree, u.deg, 1)
+    data = get_data_via_astroquery_cone(service, 280, -60, 1.0, u.degree, u.deg, 1)
     # Get the data into a table format
     output_list = get_content_table_to_display(data)
     # To display the table first we need to get terminal width
@@ -445,29 +457,34 @@ def get_object_coordinates(object_name):
     """
     Get the coordinates using service from Strasbourg astronomical Data Center (http://cdsweb.u-strasbg.fr)
     """
-
-    p = log.progress(f"{colors['L_GREEN']}Object coordinates{colors['NC']}")
     try:
-        p.status(f"{colors['GREEN']}Attempting to extract coordinates for your object...{colors['NC']}")
         # Use the SkyCoord.from_name() function to get the coordinates
         object_coord = SkyCoord.from_name(object_name)
         found_object = True
-
-    except ResolveError:
-        p.failure(f"{colors['RED']}Could not find coordinates for object '{object_name}'{colors['NC']}")
+    except NameResolveError:
         found_object = False
         return None, found_object
-    p.success("Coords extracted!")
-
     return object_coord, found_object
 
+
+def try_to_extract_angles(coord_parameter):
+    try:
+        coord_parameter_angle = Angle(coord_parameter)
+        return coord_parameter_angle.dec, True
+    except UnitsError as e:
+        coord_parameter_angle = Angle(coord_parameter, unit='deg')
+        return coord_parameter_angle, True
+    except:
+        return None, False
 
 def decide_coords(args):
     """
     Based if the object provided by the user was found or not, decide what coordinates the program will use
     """
+    p = log.progress(f'{colors["L_GREEN"]}Obtaining coordinates for object{colors["NC"]}')
     object_coordinates, found_object = get_object_coordinates(args.name)
     if found_object:
+        p.success(f'{colors["GREEN"]}Coords found in Archive{colors["NC"]}')
         return object_coordinates.ra, object_coordinates.dec
     if not found_object:
         # Check if the user has provided parameters so we can extract the coordinates manually
@@ -478,11 +495,197 @@ def decide_coords(args):
             print(f"{warning}{colors['RED']} Invalid object name ('{args.name}') and Declination not provided ('--declination')")
             sys.exit(1)
         # If the user has provided coordinates, use them
-
+        p.failure(f"{colors['RED']} Object could not be found in Archives. Using coordinates provided instead{colors['NC']}")
+        # Try to create SkyCoord with provided units
+        RA, DEC = args.right_ascension, args.declination
+        try:
+            coord_manual = SkyCoord(RA, DEC)
+        except UnitsError:
+            # Assume default units (degrees) if no units are specified
+            coord_manual = SkyCoord(ra=RA, dec=DEC, unit=(u.deg, u.deg))
+        except:
+            print(f"{warning} {colors['RED']}Unable to convert coordinates provided (RA '{args.right_ascension}' and DEC '{args.declination}') to degree units. Review your input and retry...{colors['NC']}")
+            sys.exit(1)
+        return coord_manual.ra.degree, coord_manual.dec.degree
+            
             
 
+@dataclass(kw_only=True)
+class onlineVasilievObject:
+    name: str = '' # object name
+    opt_name: str = ''# optional name if available
+    ra: str
+    dec:float  # deg
+    pmra:float  # mas/yr
+    e_pmra:float  # mas/yr
+    pmdec:float  # mas/yr
+    e_pmdec:float  # mas/yr
+    parallax:float  # mas
+    e_parallax:float  # mas
+    rscale:float # arcmin
+    nstar:int  # number of Gaia-detected cluster stars
 
 
+def get_extra_object_info_globular_cluster(args):
+    """
+    Request Globular Cluster data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) if available
+    """
+    p = log.progress(f"{colors['L_GREEN']}Searching data for Globular Clusters{colors['NC']}")
+    # Check data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V)
+    vasiliev_baumgardt_url = "https://cdsarc.cds.unistra.fr/ftp/J/MNRAS/505/5978/tablea1.dat"
+
+    p.status(f"{colors['GREEN']}Requesting data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
+
+    response = requests.get(vasiliev_baumgardt_url)
+
+    # Check the HTTP status code
+    if response.status_code == 200:
+        # Read the content of the response
+        source_code = response.text
+
+    # Split the source code into lines
+    lines = source_code.splitlines()
+
+    # Objects with a single word name
+    exceptions_object_names = ['Eridanus', 'Pyxis', 'Crater']
+    exception_alt_names = ['1636-283']
+
+    # Iterate over each line
+    for line in lines:
+        # Split the line into columns
+        columns = line.split()
+        single_name_condition = columns[0].lower() == args.name.lower() and args.name.lower() in [exception_object.lower() for exception_object in exceptions_object_names]
+        single_name_condition = single_name_condition and len(columns) == 12
+
+        if single_name_condition:
+            vasiliev_name = columns[0]
+            vasiliev_ra = float(columns[1])
+            vasiliev_dec = float(columns[2])
+            vasiliev_pmra = float(columns[3])
+            vasiliev_e_pmra = float(columns[4])
+            vasiliev_pmdec = float(columns[5])
+            vasiliev_e_pmdec = float(columns[6])
+            vasiliev_parallax = float(columns[8])
+            vasiliev_e_parallax = float(columns[9])
+            vasiliev_rscale = float(columns[10])
+            vasiliev_nstar = int(columns[11])
+            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                   ra=vasiliev_ra,
+                                                   dec=vasiliev_dec,
+                                                   pmra=vasiliev_pmra,
+                                                   e_pmra=vasiliev_e_pmra,
+                                                   pmdec=vasiliev_pmdec,
+                                                   e_pmdec=vasiliev_e_pmdec,
+                                                   parallax=vasiliev_parallax,
+                                                   e_parallax=vasiliev_e_parallax,
+                                                   rscale=vasiliev_rscale,
+                                                   nstar=vasiliev_nstar)
+            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
+            return True, vasiliev_object
+
+        # There is, literally, 1 line with an alternative name with only 1 component '1636-283'
+        special_case_condition =  (args.name.lower() == '1636-283' or args.name.lower == '1636 283') and columns[2] == '1636-283'
+        special_case_condition = special_case_condition and len(columns) == 14
+        if special_case_condition:
+            vasiliev_name = f"{columns[0]} {columns[1]}"
+            vasiliev_opt_name = f"{columns[2]}"
+            vasiliev_ra = float(columns[3])
+            vasiliev_dec = float(columns[4])
+            vasiliev_pmra = float(columns[5])
+            vasiliev_e_pmra = float(columns[6])
+            vasiliev_pmdec = float(columns[7])
+            vasiliev_e_pmdec = float(columns[8])
+            vasiliev_parallax = float(columns[10])
+            vasiliev_e_parallax = float(columns[11])
+            vasiliev_rscale = float(columns[12])
+            vasiliev_nstar = int(columns[13])
+            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                   opt_name=vasiliev_opt_name,
+                                                   ra=vasiliev_ra,
+                                                   dec=vasiliev_dec,
+                                                   pmra=vasiliev_pmra,
+                                                   e_pmra=vasiliev_e_pmra,
+                                                   pmdec=vasiliev_pmdec,
+                                                   e_pmdec=vasiliev_e_pmdec,
+                                                   parallax=vasiliev_parallax,
+                                                   e_parallax=vasiliev_e_parallax,
+                                                   rscale=vasiliev_rscale,
+                                                   nstar=vasiliev_nstar)
+            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
+            return True, vasiliev_object
+
+    
+        # Objects with 2 component name, for example "NGC" and a number and an alternative name
+        possible_object_names = [f"{columns[0].lower()}{columns[1].lower()}", 
+                                 f"{columns[0].lower()} {columns[1].lower()}", 
+                                 f"{columns[2].lower()}{columns[3].lower()}", 
+                                 f"{columns[2].lower()} {columns[3].lower()}"]
+        
+        no_alternatives_names_condition = args.name.lower() in possible_object_names and len(columns) == 13
+        if no_alternatives_names_condition:
+            vasiliev_name = f"{columns[0]} {columns[1]}"
+            vasiliev_ra = float(columns[2])
+            vasiliev_dec = float(columns[3])
+            vasiliev_pmra = float(columns[4])
+            vasiliev_e_pmra = float(columns[5])
+            vasiliev_pmdec = float(columns[6])
+            vasiliev_e_pmdec = float(columns[7])
+            vasiliev_parallax = float(columns[9])
+            vasiliev_e_parallax = float(columns[10])
+            vasiliev_rscale = float(columns[11])
+            vasiliev_nstar = int(columns[12])
+            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                   ra=vasiliev_ra,
+                                                   dec=vasiliev_dec,
+                                                   pmra=vasiliev_pmra,
+                                                   e_pmra=vasiliev_e_pmra,
+                                                   pmdec=vasiliev_pmdec,
+                                                   e_pmdec=vasiliev_e_pmdec,
+                                                   parallax=vasiliev_parallax,
+                                                   e_parallax=vasiliev_e_parallax,
+                                                   rscale=vasiliev_rscale,
+                                                   nstar=vasiliev_nstar)
+            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
+            return True, vasiliev_object
+            
+
+        multiple_name_condition = args.name.lower() in possible_object_names and len(columns) == 15
+        if multiple_name_condition:
+            vasiliev_name = f"{columns[0]} {columns[1]}"
+            vasiliev_opt_name = f"{columns[2]} {columns[3]}"
+            vasiliev_ra = float(columns[4])
+            vasiliev_dec = float(columns[5])
+            vasiliev_pmra = float(columns[6])
+            vasiliev_e_pmra = float(columns[7])
+            vasiliev_pmdec = float(columns[8])
+            vasiliev_e_pmdec = float(columns[9])
+            vasiliev_parallax = float(columns[11])
+            vasiliev_e_parallax = float(columns[12])
+            vasiliev_rscale = float(columns[13])
+            vasiliev_nstar = int(columns[14])
+            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                   opt_name=vasiliev_opt_name,
+                                                   ra=vasiliev_ra,
+                                                   dec=vasiliev_dec,
+                                                   pmra=vasiliev_pmra,
+                                                   e_pmra=vasiliev_e_pmra,
+                                                   pmdec=vasiliev_pmdec,
+                                                   e_pmdec=vasiliev_e_pmdec,
+                                                   parallax=vasiliev_parallax,
+                                                   e_parallax=vasiliev_e_parallax,
+                                                   rscale=vasiliev_rscale,
+                                                   nstar=vasiliev_nstar)
+            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
+            return True, vasiliev_object
+
+    if response.status_code != 200:
+        p.failure(f"{colors['RED']}Unable to reach the data source website ('{vasiliev_baumgardt_url}'). Check your internet connection and retry.{colors['NC']}")
+        return False, None
+    p.failure(f"{colors['RED']}Data not found for '{args.name}' in Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V). Continuing...{colors['NC']}")
+    return False, None
+
+    
+    
 
 def extractCommand(args):
     # 'raw' subcommand
@@ -490,6 +693,10 @@ def extractCommand(args):
         # 'cone' subcommand
         if args.subsubcommand == "cone":
             RA, DEC = decide_coords(args)
+            # if the flag '--skip-extra-data' is not provided, get Gaia-based data online
+            if not args.skip_extra_data:
+                success, globular_cluster_data = get_extra_object_info_globular_cluster(args)
+
 
 
 ####################
@@ -507,6 +714,7 @@ def plotCommand(args) -> None:
     if args.subcommand == 'raw':
         pass
     return
+
 
 def main() -> None:
     # Parse the command-line arguments/get flags and their values provided by the user
