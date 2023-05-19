@@ -9,12 +9,14 @@ from astroquery.gaia import Gaia
 from astropy.coordinates.name_resolve import NameResolveError
 from astropy.units.core import UnitsError
 from astropy.coordinates import Angle
-import astroquery.utils.tap.core as tapcore
-from pwn import *
+from pwn import log
 import shutil
 from tabulate import tabulate
 import random
 import matplotlib.pyplot as plt
+import re
+from typing import List
+import time
 
 from dataclasses import dataclass
 import requests
@@ -509,12 +511,40 @@ def decide_coords(args):
         return coord_manual.ra.degree, coord_manual.dec.degree
             
             
+@dataclass(kw_only=True)
+class astroStudy:
+    """
+    Studies where the data is extracted from
+    """
+    authors: List[str]
+    year: int
+    magazine: str
+    vol: str
+    page: str
+    study_url: str
+    data_url: str
+
+    def show_study(self) -> str:
+        """
+        Prints the classic "Author & Author 2 (2024)" or "Author et al. (2024)"
+        """
+        if len(self.authors) <= 2:
+            author1 = self.authors[0].split(',')[0]
+            author2 = self.authors[1].split(',')[0]
+            return f"{author1} & {author2} ({self.year}, {self.magazine}, {self.vol}, {self.page})"
+        else:
+            first_author = self.authors[0].split()[0]
+            return f"{first_author} et al. ({self.year}, {self.magazine}, {self.vol}, {self.page})"
+
 
 @dataclass(kw_only=True)
 class onlineVasilievObject:
+    """
+    Create a data structure for data obtained from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V)
+    """
     name: str = '' # object name
     opt_name: str = ''# optional name if available
-    ra: str
+    ra: float
     dec:float  # deg
     pmra:float  # mas/yr
     e_pmra:float  # mas/yr
@@ -526,166 +556,259 @@ class onlineVasilievObject:
     nstar:int  # number of Gaia-detected cluster stars
 
 
-def get_extra_object_info_globular_cluster(args):
+def get_extra_object_info_globular_cluster(args, p):
     """
     Request Globular Cluster data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) if available
     """
-    p = log.progress(f"{colors['L_GREEN']}Searching data for Globular Clusters{colors['NC']}")
+    #p = log.progress(f"{colors['L_GREEN']}Searching data for Globular Clusters{colors['NC']}")
     # Check data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V)
-    vasiliev_baumgardt_url = "https://cdsarc.cds.unistra.fr/ftp/J/MNRAS/505/5978/tablea1.dat"
+    vasiliev_baumgard_study = astroStudy(authors=["Vasiliev, E.", "Baumgardt, H."],
+                                         year=2021, magazine="MNRAS",
+                                         vol="505", page="597V",
+                                         study_url='https://ui.adsabs.harvard.edu/abs/2021MNRAS.505.5978V/abstract',
+                                         data_url='https://cdsarc.cds.unistra.fr/ftp/J/MNRAS/505/5978/tablea1.dat')
 
-    p.status(f"{colors['GREEN']}Requesting data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
+    p.status(f"{colors['GREEN']}Requesting data from {vasiliev_baumgard_study.show_study()}{colors['NC']}")
 
-    response = requests.get(vasiliev_baumgardt_url)
+    response = requests.get(vasiliev_baumgard_study.data_url)
 
     # Check the HTTP status code
     if response.status_code == 200:
         # Read the content of the response
         source_code = response.text
 
-    # Split the source code into lines
-    lines = source_code.splitlines()
+        # Split the source code into lines
+        lines = source_code.splitlines()
 
-    # Objects with a single word name
-    exceptions_object_names = ['Eridanus', 'Pyxis', 'Crater']
-    exception_alt_names = ['1636-283']
+        # Objects with a single word name
+        exceptions_object_names = ['Eridanus', 'Pyxis', 'Crater']
+        exception_alt_names = ['1636-283']
 
-    # Iterate over each line
-    for line in lines:
-        # Split the line into columns
-        columns = line.split()
-        single_name_condition = columns[0].lower() == args.name.lower() and args.name.lower() in [exception_object.lower() for exception_object in exceptions_object_names]
-        single_name_condition = single_name_condition and len(columns) == 12
+        # Iterate over each line
+        for line in lines:
+            # Split the line into columns
+            columns = line.split()
+            single_name_condition = columns[0].lower() == args.name.lower() and args.name.lower() in [exception_object.lower() for exception_object in exceptions_object_names]
+            single_name_condition = single_name_condition and len(columns) == 12
 
-        if single_name_condition:
-            vasiliev_name = columns[0]
-            vasiliev_ra = float(columns[1])
-            vasiliev_dec = float(columns[2])
-            vasiliev_pmra = float(columns[3])
-            vasiliev_e_pmra = float(columns[4])
-            vasiliev_pmdec = float(columns[5])
-            vasiliev_e_pmdec = float(columns[6])
-            vasiliev_parallax = float(columns[8])
-            vasiliev_e_parallax = float(columns[9])
-            vasiliev_rscale = float(columns[10])
-            vasiliev_nstar = int(columns[11])
-            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
-                                                   ra=vasiliev_ra,
-                                                   dec=vasiliev_dec,
-                                                   pmra=vasiliev_pmra,
-                                                   e_pmra=vasiliev_e_pmra,
-                                                   pmdec=vasiliev_pmdec,
-                                                   e_pmdec=vasiliev_e_pmdec,
-                                                   parallax=vasiliev_parallax,
-                                                   e_parallax=vasiliev_e_parallax,
-                                                   rscale=vasiliev_rscale,
-                                                   nstar=vasiliev_nstar)
-            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
-            return True, vasiliev_object
+            if single_name_condition:
+                vasiliev_name = columns[0]
+                vasiliev_ra = float(columns[1])
+                vasiliev_dec = float(columns[2])
+                vasiliev_pmra = float(columns[3])
+                vasiliev_e_pmra = float(columns[4])
+                vasiliev_pmdec = float(columns[5])
+                vasiliev_e_pmdec = float(columns[6])
+                vasiliev_parallax = float(columns[8])
+                vasiliev_e_parallax = float(columns[9])
+                vasiliev_rscale = float(columns[10])
+                vasiliev_nstar = int(columns[11])
+                vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                       ra=vasiliev_ra,
+                                                       dec=vasiliev_dec,
+                                                       pmra=vasiliev_pmra,
+                                                       e_pmra=vasiliev_e_pmra,
+                                                       pmdec=vasiliev_pmdec,
+                                                       e_pmdec=vasiliev_e_pmdec,
+                                                       parallax=vasiliev_parallax,
+                                                       e_parallax=vasiliev_e_parallax,
+                                                       rscale=vasiliev_rscale,
+                                                       nstar=vasiliev_nstar)
+                p.success(f"{colors['GREEN']} Data succesfully found and extracted from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                return True, vasiliev_object
 
-        # There is, literally, 1 line with an alternative name with only 1 component '1636-283'
-        special_case_condition =  (args.name.lower() == '1636-283' or args.name.lower == '1636 283') and columns[2] == '1636-283'
-        special_case_condition = special_case_condition and len(columns) == 14
-        if special_case_condition:
-            vasiliev_name = f"{columns[0]} {columns[1]}"
-            vasiliev_opt_name = f"{columns[2]}"
-            vasiliev_ra = float(columns[3])
-            vasiliev_dec = float(columns[4])
-            vasiliev_pmra = float(columns[5])
-            vasiliev_e_pmra = float(columns[6])
-            vasiliev_pmdec = float(columns[7])
-            vasiliev_e_pmdec = float(columns[8])
-            vasiliev_parallax = float(columns[10])
-            vasiliev_e_parallax = float(columns[11])
-            vasiliev_rscale = float(columns[12])
-            vasiliev_nstar = int(columns[13])
-            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
-                                                   opt_name=vasiliev_opt_name,
-                                                   ra=vasiliev_ra,
-                                                   dec=vasiliev_dec,
-                                                   pmra=vasiliev_pmra,
-                                                   e_pmra=vasiliev_e_pmra,
-                                                   pmdec=vasiliev_pmdec,
-                                                   e_pmdec=vasiliev_e_pmdec,
-                                                   parallax=vasiliev_parallax,
-                                                   e_parallax=vasiliev_e_parallax,
-                                                   rscale=vasiliev_rscale,
-                                                   nstar=vasiliev_nstar)
-            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
-            return True, vasiliev_object
+            # There is, literally, 1 line with an alternative name with only 1 component '1636-283'
+            special_case_condition =  (args.name.lower() == '1636-283' or args.name.lower == '1636 283') and columns[2] == '1636-283'
+            special_case_condition = special_case_condition and len(columns) == 14
+            if special_case_condition:
+                vasiliev_name = f"{columns[0]} {columns[1]}"
+                vasiliev_opt_name = f"{columns[2]}"
+                vasiliev_ra = float(columns[3])
+                vasiliev_dec = float(columns[4])
+                vasiliev_pmra = float(columns[5])
+                vasiliev_e_pmra = float(columns[6])
+                vasiliev_pmdec = float(columns[7])
+                vasiliev_e_pmdec = float(columns[8])
+                vasiliev_parallax = float(columns[10])
+                vasiliev_e_parallax = float(columns[11])
+                vasiliev_rscale = float(columns[12])
+                vasiliev_nstar = int(columns[13])
+                vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                       opt_name=vasiliev_opt_name,
+                                                       ra=vasiliev_ra,
+                                                       dec=vasiliev_dec,
+                                                       pmra=vasiliev_pmra,
+                                                       e_pmra=vasiliev_e_pmra,
+                                                       pmdec=vasiliev_pmdec,
+                                                       e_pmdec=vasiliev_e_pmdec,
+                                                       parallax=vasiliev_parallax,
+                                                       e_parallax=vasiliev_e_parallax,
+                                                       rscale=vasiliev_rscale,
+                                                       nstar=vasiliev_nstar)
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                return True, vasiliev_object
 
-    
-        # Objects with 2 component name, for example "NGC" and a number and an alternative name
-        possible_object_names = [f"{columns[0].lower()}{columns[1].lower()}", 
-                                 f"{columns[0].lower()} {columns[1].lower()}", 
-                                 f"{columns[2].lower()}{columns[3].lower()}", 
-                                 f"{columns[2].lower()} {columns[3].lower()}"]
         
-        no_alternatives_names_condition = args.name.lower() in possible_object_names and len(columns) == 13
-        if no_alternatives_names_condition:
-            vasiliev_name = f"{columns[0]} {columns[1]}"
-            vasiliev_ra = float(columns[2])
-            vasiliev_dec = float(columns[3])
-            vasiliev_pmra = float(columns[4])
-            vasiliev_e_pmra = float(columns[5])
-            vasiliev_pmdec = float(columns[6])
-            vasiliev_e_pmdec = float(columns[7])
-            vasiliev_parallax = float(columns[9])
-            vasiliev_e_parallax = float(columns[10])
-            vasiliev_rscale = float(columns[11])
-            vasiliev_nstar = int(columns[12])
-            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
-                                                   ra=vasiliev_ra,
-                                                   dec=vasiliev_dec,
-                                                   pmra=vasiliev_pmra,
-                                                   e_pmra=vasiliev_e_pmra,
-                                                   pmdec=vasiliev_pmdec,
-                                                   e_pmdec=vasiliev_e_pmdec,
-                                                   parallax=vasiliev_parallax,
-                                                   e_parallax=vasiliev_e_parallax,
-                                                   rscale=vasiliev_rscale,
-                                                   nstar=vasiliev_nstar)
-            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
-            return True, vasiliev_object
+            # Objects with 2 component name, for example "NGC" and a number and an alternative name
+            possible_object_names = [f"{columns[0].lower()}{columns[1].lower()}", 
+                                     f"{columns[0].lower()} {columns[1].lower()}", 
+                                     f"{columns[2].lower()}{columns[3].lower()}", 
+                                     f"{columns[2].lower()} {columns[3].lower()}"]
             
+            no_alternatives_names_condition = args.name.lower() in possible_object_names and len(columns) == 13
+            if no_alternatives_names_condition:
+                vasiliev_name = f"{columns[0]} {columns[1]}"
+                vasiliev_ra = float(columns[2])
+                vasiliev_dec = float(columns[3])
+                vasiliev_pmra = float(columns[4])
+                vasiliev_e_pmra = float(columns[5])
+                vasiliev_pmdec = float(columns[6])
+                vasiliev_e_pmdec = float(columns[7])
+                vasiliev_parallax = float(columns[9])
+                vasiliev_e_parallax = float(columns[10])
+                vasiliev_rscale = float(columns[11])
+                vasiliev_nstar = int(columns[12])
+                vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                       ra=vasiliev_ra,
+                                                       dec=vasiliev_dec,
+                                                       pmra=vasiliev_pmra,
+                                                       e_pmra=vasiliev_e_pmra,
+                                                       pmdec=vasiliev_pmdec,
+                                                       e_pmdec=vasiliev_e_pmdec,
+                                                       parallax=vasiliev_parallax,
+                                                       e_parallax=vasiliev_e_parallax,
+                                                       rscale=vasiliev_rscale,
+                                                       nstar=vasiliev_nstar)
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                return True, vasiliev_object
+                
 
-        multiple_name_condition = args.name.lower() in possible_object_names and len(columns) == 15
-        if multiple_name_condition:
-            vasiliev_name = f"{columns[0]} {columns[1]}"
-            vasiliev_opt_name = f"{columns[2]} {columns[3]}"
-            vasiliev_ra = float(columns[4])
-            vasiliev_dec = float(columns[5])
-            vasiliev_pmra = float(columns[6])
-            vasiliev_e_pmra = float(columns[7])
-            vasiliev_pmdec = float(columns[8])
-            vasiliev_e_pmdec = float(columns[9])
-            vasiliev_parallax = float(columns[11])
-            vasiliev_e_parallax = float(columns[12])
-            vasiliev_rscale = float(columns[13])
-            vasiliev_nstar = int(columns[14])
-            vasiliev_object = onlineVasilievObject(name=vasiliev_name,
-                                                   opt_name=vasiliev_opt_name,
-                                                   ra=vasiliev_ra,
-                                                   dec=vasiliev_dec,
-                                                   pmra=vasiliev_pmra,
-                                                   e_pmra=vasiliev_e_pmra,
-                                                   pmdec=vasiliev_pmdec,
-                                                   e_pmdec=vasiliev_e_pmdec,
-                                                   parallax=vasiliev_parallax,
-                                                   e_parallax=vasiliev_e_parallax,
-                                                   rscale=vasiliev_rscale,
-                                                   nstar=vasiliev_nstar)
-            p.success(f"{colors['GREEN']} Data succesfully found and extracted from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) {colors['NC']}")
-            return True, vasiliev_object
+            multiple_name_condition = args.name.lower() in possible_object_names and len(columns) == 15
+            if multiple_name_condition:
+                vasiliev_name = f"{columns[0]} {columns[1]}"
+                vasiliev_opt_name = f"{columns[2]} {columns[3]}"
+                vasiliev_ra = float(columns[4])
+                vasiliev_dec = float(columns[5])
+                vasiliev_pmra = float(columns[6])
+                vasiliev_e_pmra = float(columns[7])
+                vasiliev_pmdec = float(columns[8])
+                vasiliev_e_pmdec = float(columns[9])
+                vasiliev_parallax = float(columns[11])
+                vasiliev_e_parallax = float(columns[12])
+                vasiliev_rscale = float(columns[13])
+                vasiliev_nstar = int(columns[14])
+                vasiliev_object = onlineVasilievObject(name=vasiliev_name,
+                                                       opt_name=vasiliev_opt_name,
+                                                       ra=vasiliev_ra,
+                                                       dec=vasiliev_dec,
+                                                       pmra=vasiliev_pmra,
+                                                       e_pmra=vasiliev_e_pmra,
+                                                       pmdec=vasiliev_pmdec,
+                                                       e_pmdec=vasiliev_e_pmdec,
+                                                       parallax=vasiliev_parallax,
+                                                       e_parallax=vasiliev_e_parallax,
+                                                       rscale=vasiliev_rscale,
+                                                       nstar=vasiliev_nstar)
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                return True, vasiliev_object
 
     if response.status_code != 200:
-        p.failure(f"{colors['RED']}Unable to reach the data source website ('{vasiliev_baumgardt_url}'). Check your internet connection and retry.{colors['NC']}")
+        p.status(f"{colors['RED']}Unable to reach the data source website ('{vasiliev_baumgard_study.data_url}'). Check your internet connection and retry.{colors['NC']}")
+        time.sleep(2)
         return False, None
-    p.failure(f"{colors['RED']}Data not found for '{args.name}' in Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V). Continuing...{colors['NC']}")
+    p.status(f"{colors['RED']}Data not found for '{args.name}' in {vasiliev_baumgard_study.show_study()}. Continuing...{colors['NC']}")
+    time.sleep(2)
     return False, None
 
+
+@dataclass(kw_only=True)
+class onlineCantanObject:
+    """
+    Object to store data extracted from Cantat-Gaudin et al. (2020, A&A, 640, A1)
+    For more info check: https://cdsarc.cds.unistra.fr/ftp/J/A+A/640/A1/ReadMe
+    """
+    name: str
+    ra: float # deg, J2000
+    dec: float # deg, J2000
+    r50: float # deg - Radius containing half the members
+    pmra: float # mas / yr
+    e_pmra: float # mas / yr
+    pmdec: float # mas / yr
+    e_pmdec: float # mas / yr
+    parallax: float # mas
+    e_parallax: float # mas
+    log_age: float # Age (logt) of the cluster in years
+    a_v: float # Extinction Av of the cluster (mag)
+    d_modulus: float # Distance modulus of the cluster (mag)
+    distance: float # pc
+    rgc : float # distance from galaxy center, assuming the distance is 8340 pc (pc)
+
+
+
     
-    
+def get_extra_object_info_open_cluster(args, p):
+    """
+    Request Open Cluster data from Cantat-Gaudin et al. (2020, A&A, 640, A1) if available
+    """
+    cantat_gaudin_study = astroStudy(authors=["Cantat-Gaudin, T.", "Anders, F.", "Castro-Ginard, A.","Jordi, C.",
+                                              "Romero-Gómez, M.","Soubiran, C.","Casamiquela, L.","Tarricq, Y."
+                                              ,"Moitinho, A.","Vallenari, A.","Bragaglia, A.","Krone-Martins, A.",
+                                              "Kounkel, M."], 
+                                     year=2020, 
+                                     magazine="A&A", 
+                                     vol="640", 
+                                     page="A1",
+                                     study_url='https://ui.adsabs.harvard.edu/abs/2020A%26A...640A...1C/abstract',
+                                     data_url='https://cdsarc.cds.unistra.fr/ftp/J/A+A/640/A1/table1.dat')
+    p.status(f"{colors['GREEN']}Requesting data from {cantat_gaudin_study.show_study()}{colors['NC']}")
+    # Request data
+    response = requests.get(cantat_gaudin_study.data_url)
+    # Check the HTTP status code
+    if response.status_code == 200:
+        # Read the content of the response
+        source_code = response.text
+
+        # Split the source code into lines
+        lines = source_code.splitlines()
+
+        for line in lines:
+            columns = line.split()
+            # Special case
+            if "coin" in columns[0].lower():
+                possible_names = [columns[0].lower(), columns[0].lower().replace('-', ' ').replace('_', ' '),
+                                  columns[0].lower().replace('-', '').replace('_', '')]
+            # All the posible options
+            possible_names = [columns[0].lower(), columns[0].lower().replace('_', ' '),
+                              columns[0].lower().replace('_', ''), columns[0].lower().replace('_', '-')]
+
+            if args.name.lower() in possible_names:
+                cantat_object = onlineCantanObject(name=f"{columns[0].replace('_',' ')}",
+                                                   ra = float(columns[1]),
+                                                   dec = float(columns[2]),
+                                                   r50 = float(columns[5]),
+                                                   pmra = float(columns[7]),
+                                                   e_pmra = float(columns[8]),
+                                                   pmdec = float(columns[9]),
+                                                   e_pmdec = float(columns[10]),
+                                                   parallax = float(columns[11]),
+                                                   e_parallax = float(columns[12]),
+                                                   log_age = float(columns[14]),
+                                                   a_v = float(columns[15]),
+                                                   d_modulus=float(columns[16]),
+                                                   distance=float(columns[17]),
+                                                   rgc=float(columns[-1]))
+
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Open Cluster{colors['GREEN']} from {cantat_gaudin_study.show_study()} {colors['NC']}")
+                print(cantat_object)
+                return True, cantat_object
+    if response.status_code != 200:
+        p.failure(f"{colors['RED']}Unable to reach the data source website ('{cantat_gaudin_study.data_url}'). Check your internet connection and retry.{colors['NC']}")
+        time.sleep(2)
+        return False, None
+    p.failure(f" {colors['RED']}Could not find online data available for '{args.name}' object. Continuing...")
+    return False, None
+
+
 
 def extractCommand(args):
     # 'raw' subcommand
@@ -695,7 +818,12 @@ def extractCommand(args):
             RA, DEC = decide_coords(args)
             # if the flag '--skip-extra-data' is not provided, get Gaia-based data online
             if not args.skip_extra_data:
-                success, globular_cluster_data = get_extra_object_info_globular_cluster(args)
+                p = log.progress(f"{colors['L_GREEN']}Searching data online{colors['NC']}")
+                # Check is the object is found as a Globular cluster
+                object_online_found, object_online_data = get_extra_object_info_globular_cluster(args, p)
+                # If the object has not been found as a Globular Cluster, search if it is a Open Cluster
+                if not object_online_found:
+                    object_online_found, online_object_data = get_extra_object_info_open_cluster(args, p) 
 
 
 
