@@ -197,18 +197,18 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
         parser_provided.parse_args(['plot', 'from-file', '-h'])
             
 
-def checkNameObjectProvidedByUser(name_object):
+def checkNameObjectProvidedByUser(name_object) -> None:
     """
     Checks if a user has provided a valid object name. For example, object name 'NGC104' is valid, '<NGC104>' is not. 
     Also, 'NGC 104' is converted to 'NGC_104' for future functions/usage
     """
     pattern = r'^[\w ]+$'
-    name_to_test = name_object.replace(' ', '_')
     pass_test = bool(re.match(pattern, name_object))
     if pass_test:
-        return name_to_test
+        return
     if not pass_test:
-        print("{warning} You have provided an invalid name (which may contain invalid characters): '{name_object}'")
+        print(f"{warning} You have provided an invalid name (which may contain invalid characters): {colors['RED']}'{name_object}'{colors['NC']}")
+        print(f"    Valid object names examples: NGC104  --  alessa1 -- myRandomObject -- i_love_my_dog")
         sys.exit(1)
 
 
@@ -497,7 +497,7 @@ def decide_coords(args):
             print(f"{warning}{colors['RED']} Invalid object name ('{args.name}') and Declination not provided ('--declination')")
             sys.exit(1)
         # If the user has provided coordinates, use them
-        p.failure(f"{colors['RED']} Object could not be found in Archives. Using coordinates provided instead{colors['NC']}")
+        p.failure(f"{colors['RED']} Object could not be found in Archives (astropy). Using coordinates provided by the user instead{colors['NC']}")
         # Try to create SkyCoord with provided units
         RA, DEC = args.right_ascension, args.declination
         try:
@@ -544,8 +544,8 @@ class onlineVasilievObject:
     """
     name: str = '' # object name
     opt_name: str = ''# optional name if available
-    ra: float
-    dec:float  # deg
+    ra: float  # deg J2000
+    dec:float  # deg J2000
     pmra:float  # mas/yr
     e_pmra:float  # mas/yr
     pmdec:float  # mas/yr
@@ -815,7 +815,9 @@ def extractCommand(args):
     if args.subcommand == "raw":
         # 'cone' subcommand
         if args.subsubcommand == "cone":
-            RA, DEC = decide_coords(args)
+            object_online_found = False
+            if args.skip_extra_data:
+                print(f"{sb} '--skip_extra_data' enabled. Skipping online data extract steps...")
             # if the flag '--skip-extra-data' is not provided, get Gaia-based data online
             if not args.skip_extra_data:
                 p = log.progress(f"{colors['L_GREEN']}Searching data online{colors['NC']}")
@@ -823,7 +825,15 @@ def extractCommand(args):
                 object_online_found, object_online_data = get_extra_object_info_globular_cluster(args, p)
                 # If the object has not been found as a Globular Cluster, search if it is a Open Cluster
                 if not object_online_found:
-                    object_online_found, online_object_data = get_extra_object_info_open_cluster(args, p) 
+                    object_online_found, object_online_data = get_extra_object_info_open_cluster(args, p)
+            # If the object was found online, use those coords. Otherwise search for coords using astropy and, lastly, the ones provided by the user
+            if not object_online_found:
+                RA, DEC = decide_coords(args)
+            if object_online_found:
+                RA, DEC = object_online_data.ra, object_online_data.dec
+                print(f"Coords {object_online_data.ra}, {object_online_data.dec}")
+
+
 
 
 
@@ -852,6 +862,9 @@ def main() -> None:
     checkUserHasProvidedArguments(parser, args, len(sys.argv))
 
     printBanner()
+
+    # Check that user has provided a valid format-name
+    checkNameObjectProvidedByUser(args.name)
 
     # Run 'show-gaia-content' command
     if args.command == 'show-gaia-content':
