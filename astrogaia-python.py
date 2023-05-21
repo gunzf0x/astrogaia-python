@@ -562,15 +562,15 @@ def get_extra_object_info_globular_cluster(args, p):
     """
     #p = log.progress(f"{colors['L_GREEN']}Searching data for Globular Clusters{colors['NC']}")
     # Check data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V)
-    vasiliev_baumgard_study = astroStudy(authors=["Vasiliev, E.", "Baumgardt, H."],
+    vasiliev_baumgardt_study = astroStudy(authors=["Vasiliev, E.", "Baumgardt, H."],
                                          year=2021, magazine="MNRAS",
                                          vol="505", page="597V",
                                          study_url='https://ui.adsabs.harvard.edu/abs/2021MNRAS.505.5978V/abstract',
                                          data_url='https://cdsarc.cds.unistra.fr/ftp/J/MNRAS/505/5978/tablea1.dat')
 
-    p.status(f"{colors['GREEN']}Requesting data from {vasiliev_baumgard_study.show_study()}{colors['NC']}")
+    p.status(f"{colors['GREEN']}Requesting data from {vasiliev_baumgardt_study.show_study()}{colors['NC']}")
 
-    response = requests.get(vasiliev_baumgard_study.data_url)
+    response = requests.get(vasiliev_baumgardt_study.data_url)
 
     # Check the HTTP status code
     if response.status_code == 200:
@@ -614,7 +614,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data succesfully found and extracted from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']} Data succesfully found and extracted from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
             # There is, literally, 1 line with an alternative name with only 1 component '1636-283'
@@ -645,7 +645,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
         
@@ -679,7 +679,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
                 
 
@@ -709,14 +709,14 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgard_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
     if response.status_code != 200:
-        p.status(f"{colors['RED']}Unable to reach the data source website ('{vasiliev_baumgard_study.data_url}'). Check your internet connection and retry.{colors['NC']}")
+        p.status(f"{colors['RED']}Unable to reach the data source website ('{vasiliev_baumgardt_study.data_url}'). Check your internet connection and retry.{colors['NC']}")
         time.sleep(2)
         return False, None
-    p.status(f"{colors['RED']}Data not found for '{args.name}' in {vasiliev_baumgard_study.show_study()}. Continuing...{colors['NC']}")
+    p.status(f"{colors['RED']}Data not found for '{args.name}' in {vasiliev_baumgardt_study.show_study()}. Continuing...{colors['NC']}")
     time.sleep(2)
     return False, None
 
@@ -863,9 +863,7 @@ def main() -> None:
 
     printBanner()
 
-    # Check that user has provided a valid format-name
-    checkNameObjectProvidedByUser(args.name)
-
+    
     # Run 'show-gaia-content' command
     if args.command == 'show-gaia-content':
         showGaiaContent(args)
@@ -874,10 +872,15 @@ def main() -> None:
     if args.command == 'extract':
         # Check if the user is using Python3.10 or higher, which is required for this function
         checkPythonVersion()
+        # Check that user has provided a valid format-name
+        checkNameObjectProvidedByUser(args.name)
+
         extractCommand(args)
 
 
     if args.command == 'plot':
+        # Check that user has provided a valid format-name
+        checkNameObjectProvidedByUser(args.name)  
         plotCommand(args)
         
 
