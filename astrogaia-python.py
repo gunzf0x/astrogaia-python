@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import re
 from typing import List
 import time
+import pprint
 
 from dataclasses import dataclass
 import requests
@@ -44,7 +45,7 @@ colors = {
 script_version = 'v1.0.0'
 
 # Define simple characters
-sb: str = f'{colors["L_CYAN"]}[*]{colors["NC"]}' # [*]
+sb: str = f'{colors["L_CYAN"]}[{colors["YELLOW"]}*{colors["L_CYAN"]}]{colors["NC"]}' # [*]
 sb_v2: str = f'{colors["RED"]}[{colors["YELLOW"]}+{colors["RED"]}]{colors["NC"]}' # [*]
 whitespaces: str = " "*(len(sb)+1) # '    '
 warning: str = f'{colors["YELLOW"]}[{colors["RED"]}!{colors["YELLOW"]}]{colors["NC"]}' # [!]
@@ -94,7 +95,7 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_cone.add_argument('-n', '--name', type=str, required=True,
                                                            help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-r', '--radii', type=float, required=True,
-                                                           help="Radius to extract data. Default units: degrees")
+                                                           help="Radius to extract data. Default units: arcmin (see '--radius-units' to change this)")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--right-ascension', type=str,
                                                            help="Right ascension J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--declination', type=str,
@@ -104,6 +105,18 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--file-extension', type=str, default="dat",
                                                            help="Extension for the output file")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--gaia-release', default='gdr3', type=str,
+                                                           help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--radius-units', default='arcmin', type=str,
+                                                           help="Units for radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--row-limit', type=int, default=-1,
+                                                            help='Limit of rows/data to retrieve from Archive. Default = -1 (which means "NO LIMIT")')
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                           help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
+
+    
+
 
     # Sub-subcommand: extract - raw - rectangle
     str_extract_subcommand_raw_subsubcommand_rect = 'rectangle'
@@ -127,8 +140,8 @@ def parseArgs():
                                                             help='Plot data directly extracted from Gaia Archive',
                                                             description=f'{colors["L_RED"]}Plot data directly extracted from Gaia Archive{colors["NC"]}')
     plot_subcommand_raw.add_argument('-n', '--name', help="Set a object name for the sample. Example: 'NGC104', 'my_sample'")
-    plot_subcommand_raw.add_argument('-ra', "--right-ascension", help="Right Ascension (J2000) for the center of data")
-    plot_subcommand_raw.add_argument('-dec', "--declination", help="Declination (J2000) for the center of data")
+    plot_subcommand_raw.add_argument("--right-ascension", help="Right Ascension (J2000) for the center of data")
+    plot_subcommand_raw.add_argument("--declination", help="Declination (J2000) for the center of data")
     plot_subcommand_raw.add_argument('-r', "--radii", help="Radius for the data centered in (RA, DEC) flags in arcmin")
     plot_subcommand_raw.add_argument('--ra-units', default="degree", type=str,  
                                       help="Specify the units to use based on 'astropy' (default: degree). Options: {deg, }")
@@ -154,16 +167,6 @@ def parseArgs():
     args = parser.parse_args()
 
     return parser, args
-
-# Check if Python version running is at least 3.10
-def checkPythonVersion() -> None:
-    """
-    Since this script uses some functions defined only since Python 3.10, it is required to run. Otherwise it will throw an errors while running
-    """
-    if sys.version_info < (3,10):
-        print("{colors['L_RED']}[!] This function requires Python 3.10 (or higher) to run{colors['NC']}")
-        sys.exit(1)
-    return
 
 
 def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provided) -> None:
@@ -367,32 +370,59 @@ def select_gaia_astroquery_service(service_requested: str) -> str:
     return service
     
 
-def get_data_via_astroquery_cone(input_service, input_ra, input_dec, input_radius, 
-                                 coords_units, radius_units, input_rows):
+def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
+    #(args, input_ra, input_dec, mode)
     """
-    Get data applying a query to Astroquery using "cone search"
+    Get data applying a query to Astroquery
     """
-    ### Get data via Astroquery
-    Gaia.MAIN_GAIA_TABLE = input_service 
-    Gaia.ROW_LIMIT = input_rows 
-    p = log.progress(f'{colors["L_GREEN"]}Requesting data')
-    logging.getLogger('astroquery').setLevel(logging.WARNING)
+    # Get the service to request data
+    service = select_gaia_astroquery_service(args.gaia_release)
 
-    # Make request to the service
-    try:
-        p.status(f"{colors['PURPLE']}Querying table for '{input_service.replace('.gaia_source', '')}' service...{colors['NC']}")
-        coord = SkyCoord(ra=input_ra, dec=input_dec, unit=(coords_units, coords_units), frame='icrs')
-        radius = u.Quantity(input_radius, radius_units)
-        j = Gaia.cone_search_async(coord, radius)         
-        logging.getLogger('astroquery').setLevel(logging.INFO)
-    except:
-        p.failure(f"{colors['RED']}Error while requesting data. Check your internet connection is stable and retry...{colors['NC']}")
-        sys.exit(1)
+    ### Get the input parameters
 
-    p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
-    # Get the final data to display its columns as a table
-    r = j.get_results()
-    return r 
+    # Mode for "show-gaia-content" command
+    if purpose == 'content' and mode == 'cone':
+        input_ra = 280
+        input_dec = -60
+        radius_units = u.deg
+        input_radius = 1.0
+        input_rows = 1
+
+    # Mode for "normal" cone search
+    if purpose == 'normal' and mode == 'cone':
+        # Get the coordinates of the object in degrees
+        input_ra = RA
+        input_dec = DEC
+        # Get the units for the radius, and check if the radius is valid (positive number)
+        radius_units = decide_radius_units_and_value(args.radii, args.radius_units) 
+        # Check if the user has provided a valid number of rows to extract
+        check_number_of_rows_provided(args.row_limit)
+        input_radius = args.radii
+        input_rows = args.row_limit
+                
+
+    if mode == 'cone':
+        ### Get data via Astroquery
+        Gaia.MAIN_GAIA_TABLE = service 
+        Gaia.ROW_LIMIT = input_rows 
+        p = log.progress(f'{colors["L_GREEN"]}Requesting data')
+        logging.getLogger('astroquery').setLevel(logging.WARNING)
+
+        # Make request to the service
+        try:
+            p.status(f"{colors['PURPLE']}Querying table for '{service.replace('.gaia_source', '')}' service...{colors['NC']}")
+            coord = SkyCoord(ra=input_ra, dec=input_dec, unit=(u.degree, u.degree), frame='icrs')
+            radius = u.Quantity(input_radius, radius_units)
+            j = Gaia.cone_search_async(coord, radius)         
+            logging.getLogger('astroquery').setLevel(logging.INFO)
+        except:
+            p.failure(f"{colors['RED']}Error while trying to request data{colors['NC']}")
+            sys.exit(1)
+
+        p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
+        # Get the final data to display its columns as a table
+        r = j.get_results()
+        return r 
 
 
 def get_data_via_astroquery_rect(input_service, input_ra, input_dec, input_width, input_height, 
@@ -400,9 +430,8 @@ def get_data_via_astroquery_rect(input_service, input_ra, input_dec, input_width
     """
     Get data applying a query to Astroquery using "cone search"
     """
+    pass
 
-
-    
 
 def get_content_table_to_display(data):
     """
@@ -432,13 +461,10 @@ def showGaiaContent(args) -> None:
     Get columns to display for GaiaDR3, GaiaEDR3 or GaiaDR2
     """
     displaySections('show-gaia-content', randomColor(), randomChar())
-    # Get arguments
-    service_requested = args.gaia_release
+    # Get table format to display the content
     table_format = args.table_format
-    # Get which service the user wants to use
-    service = select_gaia_astroquery_service(service_requested)
     # Get an example data
-    data = get_data_via_astroquery_cone(service, 280, -60, 1.0, u.degree, u.deg, 1)
+    data = get_data_via_astroquery(args, 280, -60, 'cone', 'content')
     # Get the data into a table format
     output_list = get_content_table_to_display(data)
     # To display the table first we need to get terminal width
@@ -533,7 +559,7 @@ class astroStudy:
             author2 = self.authors[1].split(',')[0]
             return f"{author1} & {author2} ({self.year}, {self.magazine}, {self.vol}, {self.page})"
         else:
-            first_author = self.authors[0].split()[0]
+            first_author = self.authors[0].split(',')[0]
             return f"{first_author} et al. ({self.year}, {self.magazine}, {self.vol}, {self.page})"
 
 
@@ -582,7 +608,6 @@ def get_extra_object_info_globular_cluster(args, p):
 
         # Objects with a single word name
         exceptions_object_names = ['Eridanus', 'Pyxis', 'Crater']
-        exception_alt_names = ['1636-283']
 
         # Iterate over each line
         for line in lines:
@@ -808,30 +833,114 @@ def get_extra_object_info_open_cluster(args, p):
     p.failure(f" {colors['RED']}Could not find online data available for '{args.name}' object. Continuing...")
     return False, None
 
+def decide_radius_units_and_value(value, units):
+    """
+    Check if the radius provided by the user, along with its units, is valid
+    """
+    # Check if the value provided by the user is valid
+    if value < 0:
+        print("{warning} Radius must be a positive number. Check '-r' flag provided and retry")
+        sys.exit(1)
+    # Check which unit should we use to make the request
+    unit = units.lower()
+    if unit == 'deg' or unit == 'degree' or unit == 'degs' or unit == 'degrees':
+        return u.deg
+    if unit  == 'arcmin' or unit  == 'arcmins' or unit  == 'arcminute' or unit == 'arcminutes':
+        return u.arcmin
+    if unit == 'arcsec' or unit == 'arcsecs' or unit == 'arcsecond' or unit == 'arcseconds':
+        return u.arcsec
+    print(f"{warning} {colors['RED']}You have provided an invalid value for radii (--radius-units='{units}'). Using default value: 'arcmin'{colors['NC']}")
+    return u.arcmin
 
 
-def extractCommand(args):
+def check_number_of_rows_provided(rows):
+    """
+    Check if the user has provided a valid number of rows to retrieve data, which must be a positive integer or -1 ('NO LIMIT')
+    """
+    if rows == -1 or rows > 0:
+        return
+    print(f"{warning} {colors['RED']}You have provided an invalid number of rows (--row-limit= {rows}). Value must be a positive integer or -1 ('NO LIMIT'){colors['NC']}")
+    sys.exit(1)
+
+def print_elapsed_time(start_time, text_to_print)->None:
+    """
+    Checks how much time a process has taken
+    """
+    elapsed_time = time.time() - start_time
+    color1 = randomColor()
+
+    # If the time took more than a minute, print it in format MM m SS.S s
+    if elapsed_time >= 60.:
+        # Convert elapsed time to minutes and seconds
+        minutes = int(elapsed_time // 60)
+        seconds = elapsed_time % 60
+        text_elapsed_time = f"Elapsed time {text_to_print}: {minutes}m {seconds:.1f}s"
+        len_text = len(text_elapsed_time) + 4
+        text_elapsed_time = f"{sb} {randomColor()}{text_elapsed_time}{colors['NC']}"
+    # If the execution time is less than a minute, then print only in second format   
+    else:
+        text_elapsed_time = f"Elapsed time {text_to_print}: {elapsed_time:.1f}s"
+        len_text = len(text_elapsed_time) + 4 
+        text_elapsed_time = f"{sb} {randomColor()}{text_elapsed_time}{colors['NC']}"
+    print()
+    print(f"{color1}"+"-"*len_text+f"{colors['NC']}")
+    print(text_elapsed_time)
+    print(f"{color1}"+"-"*len_text+f"{colors['NC']}")
+    return
+
+
+
+def get_RA_and_DEC(args):
+    """
+    Get coordinates of the object in degrees
+    """
+    object_online_found = False
+    if args.skip_extra_data:
+        print(f"{sb} 'Skip extra data' enabled. Skipping online data extract steps...")
+    # if the flag '--skip-extra-data' is not provided, get Gaia-based data online
+    if not args.skip_extra_data:
+        p = log.progress(f"{colors['L_GREEN']}Searching data online{colors['NC']}")
+        # Check is the object is found as a Globular cluster
+        object_online_found, object_online_data = get_extra_object_info_globular_cluster(args, p)
+        # If the object has not been found as a Globular Cluster, search if it is a Open Cluster
+        if not object_online_found:
+            object_online_found, object_online_data = get_extra_object_info_open_cluster(args, p)
+    # If the object was found online, use those coords. Otherwise search for coords using astropy and, lastly, the ones provided by the user
+    if not object_online_found:
+        RA, DEC = decide_coords(args)
+    else: # if object_online_found
+        RA, DEC = object_online_data.ra, object_online_data.dec
+        print(f"Coords {object_online_data.ra}, {object_online_data.dec}")
+    return RA, DEC
+
+def print_data_requested(args, data, start_time):
+    """
+    Print the data that has been extracted via Astroquery using pprint
+    """
+    if not args.no_print_data_requested:
+        print(f"{sb} Small extract of data requested:\n\n")
+        pprint.pprint(data)
+        print()
+        print_elapsed_time(start_time, "requesting data")
+
+
+def extractCommand(args)->None:
     # 'raw' subcommand
     if args.subcommand == "raw":
         # 'cone' subcommand
         if args.subsubcommand == "cone":
-            object_online_found = False
-            if args.skip_extra_data:
-                print(f"{sb} '--skip_extra_data' enabled. Skipping online data extract steps...")
-            # if the flag '--skip-extra-data' is not provided, get Gaia-based data online
-            if not args.skip_extra_data:
-                p = log.progress(f"{colors['L_GREEN']}Searching data online{colors['NC']}")
-                # Check is the object is found as a Globular cluster
-                object_online_found, object_online_data = get_extra_object_info_globular_cluster(args, p)
-                # If the object has not been found as a Globular Cluster, search if it is a Open Cluster
-                if not object_online_found:
-                    object_online_found, object_online_data = get_extra_object_info_open_cluster(args, p)
-            # If the object was found online, use those coords. Otherwise search for coords using astropy and, lastly, the ones provided by the user
-            if not object_online_found:
-                RA, DEC = decide_coords(args)
-            if object_online_found:
-                RA, DEC = object_online_data.ra, object_online_data.dec
-                print(f"Coords {object_online_data.ra}, {object_online_data.dec}")
+            # Get coordiantes of the object in degrees
+            RA, DEC =  get_RA_and_DEC(args)
+            # Display a message
+            displaySections('extract -- raw -- cone', randomColor(), randomChar())
+            # Start a timer to check execution time
+            start_time = time.time()
+            # Get data via astroquery
+            data = get_data_via_astroquery(args, RA, DEC, 'cone', 'normal')
+            # Print the data obtained 
+            print_data_requested(args, data, start_time)
+
+
 
 
 
@@ -863,24 +972,23 @@ def main() -> None:
 
     printBanner()
 
-    
     # Run 'show-gaia-content' command
     if args.command == 'show-gaia-content':
         showGaiaContent(args)
 
     # Run 'extract' command
     if args.command == 'extract':
-        # Check if the user is using Python3.10 or higher, which is required for this function
-        checkPythonVersion()
         # Check that user has provided a valid format-name
         checkNameObjectProvidedByUser(args.name)
 
+        # Extract data using Astroquery
         extractCommand(args)
 
 
     if args.command == 'plot':
         # Check that user has provided a valid format-name
         checkNameObjectProvidedByUser(args.name)  
+
         plotCommand(args)
         
 
