@@ -18,9 +18,10 @@ import re
 from typing import List
 import time
 import pprint
-
+import os
 from dataclasses import dataclass
 import requests
+from pathlib import Path
 
 
 # ANSI escape codes dictionary
@@ -114,6 +115,7 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_cone.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
                                                            help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
 
     
 
@@ -910,7 +912,6 @@ def get_RA_and_DEC(args):
         RA, DEC = decide_coords(args)
     else: # if object_online_found
         RA, DEC = object_online_data.ra, object_online_data.dec
-        print(f"Coords {object_online_data.ra}, {object_online_data.dec}")
     return RA, DEC
 
 def print_data_requested(args, data, start_time):
@@ -922,6 +923,89 @@ def print_data_requested(args, data, start_time):
         pprint.pprint(data)
         print()
         print_elapsed_time(start_time, "requesting data")
+
+
+def replace_last_ocurrence_word(text, word_to_replace, replacement_word):
+    """
+    Replaces the last ocurrence of a word in a string. So, if I want to replace the word "pizza" with "pasta"
+    the phrase "pizza, I like pizza" becomes "pizza, I like pasta"
+    """
+    # Find the last occurrence of the word
+    last_occurrence_index = text.rfind(word_to_replace)
+    # Replace the last occurrence
+    new_text = text[:last_occurrence_index] + replacement_word + text[last_occurrence_index + len(word_to_replace):]
+    return new_text
+
+
+def where_to_save_data(args, command, mode, p)->str:
+    if not args.outfile:
+        current_path = Path.cwd()
+        filename = f"{args.name.replace(' ', '_')}_{command}_{mode}.{args.file_extension}"
+        p.status(f"{colors['YELLOW']}No outfile name provided in input. {colors['GREEN']}Data will be saved as '{filename}' into the current directory ('{current_path}'){colors['NC']}")
+        return filename
+    if args.outfile:
+        if args.outfile.endswith(args.file_extension):
+            filename = f"{replace_last_ocurrence_word(args.outfile, f'.{args.file_extension}', '')}_{command}_{mode}.{args.file_extension}"
+        else:
+            filename = f"{args.outfile}_{command}_{mode}.{args.file_extension}"
+        # Convert to a Path object
+        path = Path(filename)
+        current_path = Path.cwd()
+        if path.is_absolute():
+            p.status(f"{colors['GREEN']}Saving data in '{filename}'")
+        else:
+            p.status(f"{colors['GREEN']}Saving data in '{filename}' file into current directory ('{current_path}')...")
+    return filename
+
+
+def ask_to_replace_file(max_attempts=10)->bool:
+    # Regular expression patterns
+    yes_pattern = re.compile(r"^(y|ye|yes)$", re.IGNORECASE)
+    no_pattern = re.compile(r"^(n|no)$", re.IGNORECASE)
+
+    # Initalize attempts
+    attempts = 0
+
+    while attempts < max_attempts:
+        response = input(f"{sb_v2} {colors['GREEN']}Do you want to replace the file? {colors['RED']}[Y]es/[N]o){colors['NC']}: ")
+    
+        if yes_pattern.match(response):
+            return True
+        elif no_pattern.match(response):
+            return False
+        else:
+            print(f"{warning} {colors['YELLOW']}Invalid option. Please enter '[{colors['L_RED']}Y{colors['YELLOW']}]es' or '[{colors['L_RED']}N{colors['YELLOW']}]o'{colors['NC']}")
+            print(f"    Remaining attempts: {max_attempts - attempts}")
+            attempts += 1
+
+    if attempts > max_attempts:
+        print(f"{warning} {colors['L_RED']}You have reached the maximum number of attempts. Exiting...{colors['NC']}")
+        sys.exit(1)
+
+
+def save_data_output(args, command, mode, data):
+    p = log.progress("Saving data")
+    filename = where_to_save_data(args, command, mode, p)
+    #p.success("we did it!")
+    # If the user explicitly wants to replace the file, skip the step checking this
+    if not args.force_overwrite_outfile:
+        file_path = Path(filename)
+        # Check if file exists
+        if file_path.exists():
+            replace_file = ask_to_replace_file()
+            if not replace_file:
+                p.failure(f"{colors['RED']}Not replacing file. Exiting...{colors['NC']}")
+                sys.exit(1)
+            if replace_file:
+                p.status(f"{colors['GREEN']}Saving file as '{filename}' with '{args.data_outfile_format}' data format...{colors['NC']}")
+                data.write(filename, format=args.data_outfile_format, overwrite=True)
+                p.success("Data saved")
+                return
+    p.status(f"{colors['GREEN']}Saving file as '{filename}' with '{args.data_outfile_format}' data format...{colors['NC']}")
+    data.write(filename, format=args.data_outfile_format, overwrite=True)
+    p.success("Data saved")
+
+
 
 
 def extractCommand(args)->None:
@@ -939,10 +1023,10 @@ def extractCommand(args)->None:
             data = get_data_via_astroquery(args, RA, DEC, 'cone', 'normal')
             # Print the data obtained 
             print_data_requested(args, data, start_time)
-
-
-
-
+            # Save data
+            save_data_output(args, 'raw', 'cone', data)
+            # And we are done
+            print(f"{sb} Done!")
 
 
 
