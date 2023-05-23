@@ -927,8 +927,8 @@ def print_data_requested(args, data, start_time):
 
 def replace_last_ocurrence_word(text, word_to_replace, replacement_word):
     """
-    Replaces the last ocurrence of a word in a string. So, if I want to replace the word "pizza" with "pasta"
-    the phrase "pizza, I like pizza" becomes "pizza, I like pasta"
+    Replaces the last ocurrence of a word in a string. So, if I want to replace the word 'pizza' with 'pasta'
+    the phrase 'pizza, I like pizza' becomes 'pizza, I like pasta'
     """
     # Find the last occurrence of the word
     last_occurrence_index = text.rfind(word_to_replace)
