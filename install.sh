@@ -44,6 +44,7 @@ check_binary_presence() {
 }
 
 
+# Install Virtualenv if it is not found
 attempt_to_install_virtualvenv() {
   local env_name="$1"
   echo "[+] Attempting to install 'virtualenv' with the command 'pip3 install virtualenv'"
@@ -53,6 +54,7 @@ attempt_to_install_virtualvenv() {
   virtualenv -p python3 "$env_name"
 }
 
+# Check Python3 Version
 check_python_version() {
   local required_major=3
   local required_minor=10
@@ -71,6 +73,7 @@ check_python_version() {
 }
 
 
+# Print instructions for future use
 instructions() {
   local env_name="$1"
   echo -e "\nFollow these steps to activate the environment for 'astrogaia-python':"
@@ -82,6 +85,22 @@ instructions() {
   echo -e "iii) Run 'deactivate'"
 }
 
+
+# Print multiple lines to separate outputs
+print_multiple_times() {
+  local n_times="$1"
+  local character="$2"
+  echo "n times vale $n_times"
+
+  for ((number=1; number<=n_times; number++))
+  do
+    echo -n "$character"
+  done
+  echo
+}
+
+
+# MAIN
 main() {
   local ignore_check_python3=false
   local name=astrogaia-env
@@ -137,13 +156,12 @@ main() {
   echo never > ~/.cache/.pwntools-cache-*/update || echo "[-] Could not find 'pwntools' cache into '~/.cache' directory to disable automatic updates for this library"
     
   # Print instructions for future usage
+  print_multiple_times 30 "#"
   instructions "$name"
 
 
   # Done
-  echo -e "\n\n[+] Done! You should be good to go"
+  echo -e "\n\n[+] Done! You are ready to astro-go"
 }
-
-
 
 main "$@"
