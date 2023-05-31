@@ -90,8 +90,6 @@ instructions() {
 print_multiple_times() {
   local n_times="$1"
   local character="$2"
-  echo "n times vale $n_times"
-
   for ((number=1; number<=n_times; number++))
   do
     echo -n "$character"
@@ -99,6 +97,19 @@ print_multiple_times() {
   echo
 }
 
+
+disable_pwntools_update(){
+  # Get Python version
+  version=$(echo -n "$(python3 -V)" | awk '{print $2}')
+
+  major_version=$(echo -n "$version" | awk -F. '{print $1}')
+  minor_version=$(echo -n "$version" | awk -F. '{print $2}')
+
+  
+  file_to_write=$(echo -n "$HOME/.cache/.pwntools-cache-${major_version}.${minor_version}/update")
+
+  echo "never" > $file_to_write || echo "[-] Could not find 'pwntools' cache into '~/.cache' directory to disable automatic updates for this library" 
+}
 
 # MAIN
 main() {
@@ -153,8 +164,8 @@ main() {
   deactivate && echo "[+] Virtual Environment disabled"
 
   # Disable update for 'pwntools' python library
-  echo never > ~/.cache/.pwntools-cache-*/update || echo "[-] Could not find 'pwntools' cache into '~/.cache' directory to disable automatic updates for this library"
-    
+  disable_pwntools_update
+
   # Print instructions for future usage
   print_multiple_times 30 "#"
   instructions "$name"
