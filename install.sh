@@ -167,7 +167,7 @@ main() {
   disable_pwntools_update
 
   # Print instructions for future usage
-  print_multiple_times 30 "#"
+  print_multiple_times 45 "#"
   instructions "$name"
 
 
