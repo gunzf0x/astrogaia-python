@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 import re
 from typing import List
 import time
-import pprint
 import os
 from dataclasses import dataclass
 import requests
@@ -129,9 +128,6 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_cone.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
     extract_subcommand_raw_subsubcommand_cone.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
     extract_subcommand_raw_subsubcommand_cone.add_argument('--no-save-raw-data', action="store_true", help="Do not save raw data")
-
-    
-
 
     # Sub-subcommand: extract - raw - rectangle
     str_extract_subcommand_raw_subsubcommand_rect = 'rectangle'
@@ -1005,12 +1001,12 @@ def get_RA_and_DEC(args):
     return object_info
 
 
-def print_data_requested(data, start_time):
+def print_data_requested(data, start_time, show_n_rows=12):
     """
     Print the data that has been extracted via Astroquery using pprint
     """
     print(f"{sb} Small extract of data requested:\n\n")
-    pprint.pprint(data)
+    data.pprint(max_lines=show_n_rows)
     print()
     print_elapsed_time(start_time, "requesting data")
 
