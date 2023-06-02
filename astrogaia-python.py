@@ -22,6 +22,7 @@ import os
 from dataclasses import dataclass
 import requests
 from pathlib import Path
+import signal
 
 
 # ANSI escape codes dictionary
@@ -50,6 +51,16 @@ sb: str = f'{colors["L_CYAN"]}[{colors["YELLOW"]}*{colors["L_CYAN"]}]{colors["NC
 sb_v2: str = f'{colors["RED"]}[{colors["YELLOW"]}+{colors["RED"]}]{colors["NC"]}' # [*]
 whitespaces: str = " "*(len(sb)+1) # '    '
 warning: str = f'{colors["YELLOW"]}[{colors["RED"]}!{colors["YELLOW"]}]{colors["NC"]}' # [!]
+
+
+# Ctrl-C
+def signal_handler(signal, frame):
+    print(f"{warning} Ctrl-C. Exiting...")
+    sys.exit(1)
+
+
+# Redirect the signal handler
+signal.signal(signal.SIGINT, signal_handler)
 
 
 # Get user flags
@@ -102,9 +113,9 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_cone.add_argument('--declination', type=str,
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-o', '--outfile', type=str,
-                                                           help="Output filename to save data")
+                                                           help="Output filename to save data. File extension is automatically added, so '-o example' creates 'example.dat' file")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--file-extension', type=str, default="dat",
-                                                           help="Extension for the output file")
+                                                           help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_cone.add_argument('--gaia-release', default='gdr3', type=str,
                                                            help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
@@ -116,6 +127,8 @@ def parseArgs():
                                                            help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
     extract_subcommand_raw_subsubcommand_cone.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
+    extract_subcommand_raw_subsubcommand_cone.add_argument('--no-save-raw-data', action="store_true", help="Do not save raw data")
 
     
 
@@ -588,7 +601,6 @@ def get_extra_object_info_globular_cluster(args, p):
     """
     Request Globular Cluster data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V) if available
     """
-    #p = log.progress(f"{colors['L_GREEN']}Searching data for Globular Clusters{colors['NC']}")
     # Check data from Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V)
     vasiliev_baumgardt_study = astroStudy(authors=["Vasiliev, E.", "Baumgardt, H."],
                                          year=2021, magazine="MNRAS",
@@ -826,7 +838,6 @@ def get_extra_object_info_open_cluster(args, p):
                                                    rgc=float(columns[-1]))
 
                 p.success(f"{colors['GREEN']} Data found as {colors['RED']}Open Cluster{colors['GREEN']} from {cantat_gaudin_study.show_study()} {colors['NC']}")
-                print(cantat_object)
                 return True, cantat_object
     if response.status_code != 200:
         p.failure(f"{colors['RED']}Unable to reach the data source website ('{cantat_gaudin_study.data_url}'). Check your internet connection and retry.{colors['NC']}")
@@ -891,6 +902,20 @@ def print_elapsed_time(start_time, text_to_print)->None:
     return
 
 
+@dataclass(kw_only=True)
+class objectInfo:
+    name: str
+    RA: float
+    DEC: float
+    identifiedAs: str
+
+    def __post_init__(self):
+        """
+        Check which type of object has the data been identified as
+        """
+        allowed_values = ["GlobularCluster", "OpenCluster", "Other"]
+        if self.identifiedAs not in allowed_values:
+            raise ValueError(f"Invalid identifiedAs value. Allowed values are: {allowed_values}")
 
 def get_RA_and_DEC(args):
     """
@@ -904,25 +929,30 @@ def get_RA_and_DEC(args):
         p = log.progress(f"{colors['L_GREEN']}Searching data online{colors['NC']}")
         # Check is the object is found as a Globular cluster
         object_online_found, object_online_data = get_extra_object_info_globular_cluster(args, p)
+        identified="GlobularCluster"
         # If the object has not been found as a Globular Cluster, search if it is a Open Cluster
         if not object_online_found:
             object_online_found, object_online_data = get_extra_object_info_open_cluster(args, p)
+            identified = "OpenCluster"
     # If the object was found online, use those coords. Otherwise search for coords using astropy and, lastly, the ones provided by the user
     if not object_online_found:
         RA, DEC = decide_coords(args)
+        identified = "Other"
     else: # if object_online_found
         RA, DEC = object_online_data.ra, object_online_data.dec
-    return RA, DEC
+    object_info = objectInfo(name=args.name, RA=RA, DEC=DEC, identifiedAs=identified)
 
-def print_data_requested(args, data, start_time):
+    return object_info
+    #return RA, DEC
+
+def print_data_requested(data, start_time):
     """
     Print the data that has been extracted via Astroquery using pprint
     """
-    if not args.no_print_data_requested:
-        print(f"{sb} Small extract of data requested:\n\n")
-        pprint.pprint(data)
-        print()
-        print_elapsed_time(start_time, "requesting data")
+    print(f"{sb} Small extract of data requested:\n\n")
+    pprint.pprint(data)
+    print()
+    print_elapsed_time(start_time, "requesting data")
 
 
 def replace_last_ocurrence_word(text, word_to_replace, replacement_word):
@@ -937,11 +967,95 @@ def replace_last_ocurrence_word(text, word_to_replace, replacement_word):
     return new_text
 
 
-def where_to_save_data(args, command, mode, p)->str:
+def check_if_save_file_exists():
+    """
+    A file should be located/created as $HOME/.astrogaia-python/working.txt. 
+    The content of this file should be where would you liketo save all the outputs 
+    for this program. If the file is blank/empty then we use that path to save all 
+    the data
+    """
+    # Get $HOME path for current user
+    home_dir = os.path.expanduser("~")
+    # Name of the file containing the absolute path for the working directory
+    working_dir_file = "working.txt"
+    try:
+        with open(f"{home_dir}/.astrogaia-python/{working_dir_file}") as file:
+            # Read the first line, I do not care about the rest
+            working_directory = file.readline()
+    except FileNotFoundError:
+        return False, ''
+    working_directory = working_directory.strip()
+    if working_directory.endswith('/'):
+        working_directory = working_directory.rstrip('/')
+    return True, working_directory
+
+
+def check_if_directory_exists(pre_path: str, path_to_check: str, ask_user=False)->None:
+    """
+    Checks if a directory exists. If it does not exist, create it
+    """
+    pre_path_var = str(pre_path)
+    if not os.path.exists(path_to_check):
+        pure_path = path_to_check.replace(pre_path_var, '', 1).replace('/','',1)
+        print(f"{warning} Could not find '{pure_path}' directory in '{pre_path}'. Creating it...")
+        if ask_user:
+            ask_text = f"{sb_v2} {colors['GREEN']}Do you want to create '{pure_path}' directory in '{pre_path}' path? {colors['RED']}[Y]es/[N]o{colors['NC']}: "
+            wantToCreateDir = ask_to(ask_text)
+            if wantToCreateDir:
+                os.makedirs(path_to_check)
+            if not wantToCreateDir:
+                print(f"{warning} Exiting. You need to create a folder called '{pure_path}' in '{pre_path}'")
+                print(f"    Or use '-o' flag to provide your own/custom outfile name and skip this step")
+                sys.exit(1)
+        else:
+            os.makedirs(path_to_check)
+    return
+
+
+def get_Object_directory(args, object_path, obj_name, objectIdentifiedAs):
+    results_dir_name = 'Objects'
+    object_name_to_save = obj_name.lower().replace(' ','_')
+    object_dir_path = f"{object_path}/{results_dir_name}"
+    # Check if 'Objects' directory exists. If not, create it
+    check_if_directory_exists(object_path, object_dir_path, ask_user=args.force_create_directory)
+    # Check if, inside 'Objects' directory, the directories "GlobularCluster", "OpenCluster" or "Other" exist
+    section_path = f"{object_dir_path}/{objectIdentifiedAs}"
+    check_if_directory_exists(object_dir_path, section_path)
+    # Finally, check if a directory with the object name exists within its respective type directory
+    # e.g., since NGC104 is a Globular Cluster, check if 'Object/GlobularCluster/ngc104' directory exists
+    path_to_save = f"{section_path}/{object_name_to_save}"
+    check_if_directory_exists(section_path, path_to_save)
+    return path_to_save
+
+
+def shortened_path(full_path: str) -> str:
+    """
+    Shorten a path if the string is too large
+    """
+    list_path = full_path.split('/')
+    # Delete elements that are 'null'/empty strings
+    list_path = [element for element in list_path if element]
+    if len(list_path) <= 4:
+        return full_path
+    i=0
+    short_path = f"/{list_path[i]}/{list_path[i+1]}/.../{list_path[-i-2]}/{list_path[-i-1]}"
+    if len(full_path) <= len(short_path):
+        return full_path
+    return short_path
+    
+
+def where_to_save_data(args, command, mode, p, objectIdentifiedAs)->str:
     if not args.outfile:
-        current_path = Path.cwd()
-        filename = f"{args.name.replace(' ', '_')}_{command}_{mode}.{args.file_extension}"
-        p.status(f"{colors['YELLOW']}No outfile name provided in input. {colors['GREEN']}Data will be saved as '{filename}' into the current directory ('{current_path}'){colors['NC']}")
+        working_dir_file_exists, working_dir = check_if_save_file_exists()
+        if working_dir_file_exists:
+            current_path = working_dir
+            print("File exists")
+        else:
+            current_path = Path.cwd()
+        object_path_to_save = get_Object_directory(args, current_path, args.name, objectIdentifiedAs)
+        filename = f"{args.name.replace(' ', '_').lower()}_{command}_{mode}.{args.file_extension}"
+        filename = f"{object_path_to_save}/{filename}"
+        p.status(f"{colors['YELLOW']}No outfile name provided in input. {colors['GREEN']}Data will be saved as\n'{colors['L_BLUE']}{filename}{colors['GREEN']}'\ninto working directory ('{shortened_path(str(current_path))}'){colors['NC']}{colors['NC']}")
         return filename
     if args.outfile:
         if args.outfile.endswith(args.file_extension):
@@ -952,13 +1066,16 @@ def where_to_save_data(args, command, mode, p)->str:
         path = Path(filename)
         current_path = Path.cwd()
         if path.is_absolute():
-            p.status(f"{colors['GREEN']}Saving data in '{filename}'")
+            p.status(f"{colors['GREEN']}Saving {command!r} data in '{filename}'")
         else:
             p.status(f"{colors['GREEN']}Saving data in '{filename}' file into current directory ('{current_path}')...")
     return filename
 
 
-def ask_to_replace_file(max_attempts=10)->bool:
+def ask_to(ask_text: str, max_attempts=10)->bool | None:
+    """
+    Asks the user if wants to replace the current file using Regex
+    """
     # Regular expression patterns
     yes_pattern = re.compile(r"^(y|ye|yes)$", re.IGNORECASE)
     no_pattern = re.compile(r"^(n|no)$", re.IGNORECASE)
@@ -967,7 +1084,7 @@ def ask_to_replace_file(max_attempts=10)->bool:
     attempts = 0
 
     while attempts < max_attempts:
-        response = input(f"{sb_v2} {colors['GREEN']}Do you want to replace the file? {colors['RED']}[Y]es/[N]o){colors['NC']}: ")
+        response = input(ask_text)
     
         if yes_pattern.match(response):
             return True
@@ -983,27 +1100,53 @@ def ask_to_replace_file(max_attempts=10)->bool:
         sys.exit(1)
 
 
-def save_data_output(args, command, mode, data):
-    p = log.progress("Saving data")
-    filename = where_to_save_data(args, command, mode, p)
+def save_data_output(args, command, mode, objectIdentifiedAs, data):
+    p = log.progress(f"{colors['L_GREEN']}Saving data{colors['NC']}")
+    filename = where_to_save_data(args, command, mode, p, objectIdentifiedAs)
     #p.success("we did it!")
     # If the user explicitly wants to replace the file, skip the step checking this
     if not args.force_overwrite_outfile:
         file_path = Path(filename)
         # Check if file exists
         if file_path.exists():
-            replace_file = ask_to_replace_file()
+            print(f"{warning} {colors['GREEN']}Output file already exists ('{shortened_path(filename)}'){colors['NC']}")
+            ask_text = f"{sb_v2} {colors['GREEN']}Do you want to replace the file? {colors['RED']}[Y]es/[N]o{colors['NC']}: "           
+            replace_file = ask_to(ask_text)
             if not replace_file:
                 p.failure(f"{colors['RED']}Not replacing file. Exiting...{colors['NC']}")
                 sys.exit(1)
             if replace_file:
-                p.status(f"{colors['GREEN']}Saving file as '{filename}' with '{args.data_outfile_format}' data format...{colors['NC']}")
+                print(f"{sb} {colors['GREEN']}Saving file as '{shortened_path(filename)}' with '{args.data_outfile_format}' data format...{colors['NC']}")
                 data.write(filename, format=args.data_outfile_format, overwrite=True)
-                p.success("Data saved")
+                p.success(f"{colors['L_GREEN']}Data saved{colors['NC']}")
                 return
-    p.status(f"{colors['GREEN']}Saving file as '{filename}' with '{args.data_outfile_format}' data format...{colors['NC']}")
     data.write(filename, format=args.data_outfile_format, overwrite=True)
-    p.success("Data saved")
+    p.success(f"{colors['GREEN']}Data saved{colors['NC']}")
+
+
+
+def extractRawData(args, search_mode_var: str):
+    # Get coordiantes of the object in degrees
+    object_info =  get_RA_and_DEC(args)
+    # Display a message
+    displaySections(f'extract -- raw -- {search_mode_var}', randomColor(), randomChar())
+    # Start a timer to check execution time
+    start_time = time.time()
+    # Get data via astroquery
+    if search_mode_var == "cone":
+        raw_data = get_data_via_astroquery(args, object_info.RA, object_info.DEC, 'cone', 'normal')
+    if not args.no_print_data_requested:
+        # Print the data obtained 
+        print_data_requested(raw_data, start_time)
+    # Save data
+    if not args.no_save_raw_data:
+        save_data_output(args, 'raw', search_mode_var, object_info.identifiedAs, raw_data)
+    else:
+        print(f"{warning} Raw data extracted has not been saved")
+    #save_data_output(args, 'raw', 'cone', raw_data)
+    # And we are done
+    print(f"{sb} {colors['GREEN']}Data succesfully obtained from Archives{colors['NC']}")
+    return raw_data
 
 
 
@@ -1013,20 +1156,7 @@ def extractCommand(args)->None:
     if args.subcommand == "raw":
         # 'cone' subcommand
         if args.subsubcommand == "cone":
-            # Get coordiantes of the object in degrees
-            RA, DEC =  get_RA_and_DEC(args)
-            # Display a message
-            displaySections('extract -- raw -- cone', randomColor(), randomChar())
-            # Start a timer to check execution time
-            start_time = time.time()
-            # Get data via astroquery
-            data = get_data_via_astroquery(args, RA, DEC, 'cone', 'normal')
-            # Print the data obtained 
-            print_data_requested(args, data, start_time)
-            # Save data
-            save_data_output(args, 'raw', 'cone', data)
-            # And we are done
-            print(f"{sb} Done!")
+            raw_data = extractRawData(args, "cone")
 
 
 
