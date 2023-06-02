@@ -99,10 +99,10 @@ def parseArgs():
     epilog_str_extract_raw_cone_example = rf'''examples: {sys.argv[0]} extract raw cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
           {sys.argv[0]} extract raw cone --right-ascension "210" --declination "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, but you have to provide coords{colors["NC"]}
           {sys.argv[0]} extract raw cone --right-ascension="20h50m45.7s" --declination="-5d23m33.3s" -r=3.3 {colors["GRAY"]}# Search for negative coordinates{colors["NC"]}
-'''
+          '''
     extract_subcommand_raw_subsubcommand_cone = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_cone,
                                                                           help=f"{colors['RED']}Extract data in 'cone search' mode{colors['NC']}",
-                                                                          description=f"{colors['L_RED']}Extract data in 'code search' mode{colors['NC']}",
+                                                                          description=extract_raw_cone_subsubcommand_help,
                                                                           epilog=epilog_str_extract_raw_cone_example, formatter_class=argparse.RawTextHelpFormatter)
     extract_subcommand_raw_subsubcommand_cone.add_argument('-n', '--name', type=str, required=True,
                                                            help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
@@ -138,10 +138,36 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_rect_example = f"example: {sys.argv[0]} extract raw rectangle -ra '210' -dec '-60' -r 6.5"
     extract_subcommand_raw_subsubcommand_rect = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_rect,
                                                                                   help=f"{colors['RED']}Extract data in 'rectangle search' mode{colors['NC']}",
-                                                                                  description=f"{colors['L_RED']}Extract data in rectangle shape{colors['NC']}",
+                                                                                  description=f"{colors['L_RED']}Extract data in rectangle shape/mode{colors['NC']}",
                                                                                   epilog=f"example: {sys.argv[0]} extract raw rectangle ")
-    extract_subcommand_raw_subsubcommand_rect.add_argument('-f', '--file', help="some file")
-    extract_subcommand_raw_subsubcommand_rect.add_argument('-o', '--out', help="output file")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-n', '--name', type=str, required=True,
+                                                           help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-w', '--width', type=float, required=True,
+                                                           help="Width to extract data. Default units: arcmin (see '--width-units' to change this)")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-t', '--height', type=float, required=True,
+                                                           help="Height to extract data. Default units: arcmin (see '--height-units' to change this)")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--right-ascension', type=str,
+                                                           help="Right ascension J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--declination', type=str,
+                                                           help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-o', '--outfile', help="output file")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-x', '--file-extension', type=str, default="dat",
+                                                           help="Extension for the output file. Default = '.dat'")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--gaia-release', default='gdr3', type=str,
+                                                           help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--width-units', default='arcmin', type=str,
+                                                           help="Units for radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--height-units', default='arcmin', type=str,
+                                                           help="Units for radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--row-limit', type=int, default=-1,
+                                                            help='Limit of rows/data to retrieve from Archive. Default = -1 (which means "NO LIMIT")')
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                           help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
+    extract_subcommand_raw_subsubcommand_rect.add_argument('--no-save-raw-data', action="store_true", help="Do not save raw data")
 
     ### 'plot' command
     str_plot_command: str = 'plot'
@@ -409,11 +435,22 @@ def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
         input_ra = RA
         input_dec = DEC
         # Get the units for the radius, and check if the radius is valid (positive number)
-        radius_units = decide_radius_units_and_value(args.radii, args.radius_units) 
+        radius_units = decide_units_parameter(args.radii, args.radius_units) 
         # Check if the user has provided a valid number of rows to extract
         check_number_of_rows_provided(args.row_limit)
         input_radius = args.radii
         input_rows = args.row_limit
+    # Mode for "normal" rectangle search
+    if purpose == 'normal' and mode == 'rectangle':
+        input_ra = RA
+        input_dec = DEC
+        width_units = decide_units_parameter(args.width, args.width_units)
+        height_units = decide_units_parameter(args.height, args.height_units)
+        check_number_of_rows_provided(args.row_limit)
+        input_width = args.width
+        input_height = args.height
+        input_rows = args.row_limit
+        
                 
 
     if mode == 'cone':
@@ -438,6 +475,27 @@ def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
         # Get the final data to display its columns as a table
         r = j.get_results()
         return r 
+    if mode == 'rectangle':
+        ### Get data via Astroquery
+        Gaia.MAIN_GAIA_TABLE = service 
+        Gaia.ROW_LIMIT = input_rows 
+        p = log.progress(f'{colors["L_GREEN"]}Requesting data')
+        logging.getLogger('astroquery').setLevel(logging.WARNING)
+        # Make request to the service
+        try:
+            p.status(f"{colors['PURPLE']}Querying table for '{service.replace('.gaia_source', '')}' service...{colors['NC']}")
+            coord = SkyCoord(ra=input_ra, dec=input_dec, unit=(u.degree, u.degree), frame='icrs')
+            width = u.Quantity(input_width, width_units)
+            height = u.Quantity(input_height, height_units)
+            r = Gaia.query_object_async(coordinate=coord, width=width, height=height)
+            logging.getLogger('astroquery').setLevel(logging.INFO)
+        except:
+            p.failure(f"{colors['RED']}Error while trying to request data{colors['NC']}")
+            sys.exit(1)
+
+        p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
+        return r
+
 
 
 def get_data_via_astroquery_rect(input_service, input_ra, input_dec, input_width, input_height, 
@@ -514,7 +572,7 @@ def try_to_extract_angles(coord_parameter):
     try:
         coord_parameter_angle = Angle(coord_parameter)
         return coord_parameter_angle.dec, True
-    except UnitsError as e:
+    except UnitsError:
         coord_parameter_angle = Angle(coord_parameter, unit='deg')
         return coord_parameter_angle, True
     except:
@@ -846,7 +904,7 @@ def get_extra_object_info_open_cluster(args, p):
     p.failure(f" {colors['RED']}Could not find online data available for '{args.name}' object. Continuing...")
     return False, None
 
-def decide_radius_units_and_value(value, units):
+def decide_units_parameter(value, units):
     """
     Check if the radius provided by the user, along with its units, is valid
     """
@@ -874,6 +932,7 @@ def check_number_of_rows_provided(rows):
         return
     print(f"{warning} {colors['RED']}You have provided an invalid number of rows (--row-limit= {rows}). Value must be a positive integer or -1 ('NO LIMIT'){colors['NC']}")
     sys.exit(1)
+
 
 def print_elapsed_time(start_time, text_to_print)->None:
     """
@@ -917,6 +976,7 @@ class objectInfo:
         if self.identifiedAs not in allowed_values:
             raise ValueError(f"Invalid identifiedAs value. Allowed values are: {allowed_values}")
 
+
 def get_RA_and_DEC(args):
     """
     Get coordinates of the object in degrees
@@ -943,7 +1003,7 @@ def get_RA_and_DEC(args):
     object_info = objectInfo(name=args.name, RA=RA, DEC=DEC, identifiedAs=identified)
 
     return object_info
-    #return RA, DEC
+
 
 def print_data_requested(data, start_time):
     """
@@ -997,9 +1057,9 @@ def check_if_directory_exists(pre_path: str, path_to_check: str, ask_user=False)
     pre_path_var = str(pre_path)
     if not os.path.exists(path_to_check):
         pure_path = path_to_check.replace(pre_path_var, '', 1).replace('/','',1)
-        print(f"{warning} Could not find '{pure_path}' directory in '{pre_path}'. Creating it...")
+        print(f"{warning} Could not find '{pure_path}' directory in '{shortened_path(str(pre_path))}'. Creating it...")
         if ask_user:
-            ask_text = f"{sb_v2} {colors['GREEN']}Do you want to create '{pure_path}' directory in '{pre_path}' path? {colors['RED']}[Y]es/[N]o{colors['NC']}: "
+            ask_text = f"{sb_v2} {colors['GREEN']}Do you want to create '{pure_path}' directory in '{shortened_path(str(pre_path))}' path? {colors['RED']}[Y]es/[N]o{colors['NC']}: "
             wantToCreateDir = ask_to(ask_text)
             if wantToCreateDir:
                 os.makedirs(path_to_check)
@@ -1135,6 +1195,8 @@ def extractRawData(args, search_mode_var: str):
     # Get data via astroquery
     if search_mode_var == "cone":
         raw_data = get_data_via_astroquery(args, object_info.RA, object_info.DEC, 'cone', 'normal')
+    if search_mode_var == "rect":
+        raw_data = get_data_via_astroquery(args, object_info.RA, object_info.DEC, 'rectangle', 'normal')
     if not args.no_print_data_requested:
         # Print the data obtained 
         print_data_requested(raw_data, start_time)
@@ -1157,6 +1219,8 @@ def extractCommand(args)->None:
         # 'cone' subcommand
         if args.subsubcommand == "cone":
             raw_data = extractRawData(args, "cone")
+        if args.subsubcommand == "rectangle":
+            raw_data = extractRawData(args, "rect")
 
 
 
