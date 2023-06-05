@@ -146,7 +146,7 @@ main() {
   git clone https://github.com/GunZF0x/astrogaia-python.git && cd astrogaia-python || exit 1
 
   # Check if virtualenv commands works
-  virtualvenv -p python3 "$name" || python3 -m venv ${name} || attempt_to_install_virtualvenv "$name"
+  virtualenv -p python3 "$name" || python3 -m venv ${name} || attempt_to_install_virtualvenv "$name"
 
   # Once the virtualenv has been created, activate it
   source ${name}/bin/activate
