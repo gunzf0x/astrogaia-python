@@ -54,7 +54,7 @@ warning: str = f'{colors["YELLOW"]}[{colors["RED"]}!{colors["YELLOW"]}]{colors["
 
 # Ctrl-C
 def signal_handler(signal, frame):
-    print(f"{warning} Ctrl-C. Exiting...")
+    print(f"{warning} {colors['L_RED']}Ctrl-C. Exiting...{colors['NC']}")
     sys.exit(1)
 
 
@@ -131,7 +131,7 @@ def parseArgs():
 
     # Sub-subcommand: extract - raw - rectangle
     str_extract_subcommand_raw_subsubcommand_rect = 'rectangle'
-    extract_subcommand_raw_subsubcommand_rect_example = f"example: {sys.argv[0]} extract raw rectangle -ra '210' -dec '-60' -r 6.5"
+    extract_subcommand_raw_subsubcommand_rect_example = f"example: {sys.argv[0]} extract raw rectangle -ra '210' -dec '-60' -w 6.5 -ht 5"
     extract_subcommand_raw_subsubcommand_rect = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_rect,
                                                                                   help=f"{colors['RED']}Extract data in 'rectangle search' mode{colors['NC']}",
                                                                                   description=f"{colors['L_RED']}Extract data in rectangle shape/mode{colors['NC']}",
@@ -140,7 +140,7 @@ def parseArgs():
                                                            help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
     extract_subcommand_raw_subsubcommand_rect.add_argument('-w', '--width', type=float, required=True,
                                                            help="Width to extract data. Default units: arcmin (see '--width-units' to change this)")
-    extract_subcommand_raw_subsubcommand_rect.add_argument('-t', '--height', type=float, required=True,
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-ht', '--height', type=float, required=True,
                                                            help="Height to extract data. Default units: arcmin (see '--height-units' to change this)")
     extract_subcommand_raw_subsubcommand_rect.add_argument('--right-ascension', type=str,
                                                            help="Right ascension J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
@@ -153,9 +153,9 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_rect.add_argument('--gaia-release', default='gdr3', type=str,
                                                            help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
     extract_subcommand_raw_subsubcommand_rect.add_argument('--width-units', default='arcmin', type=str,
-                                                           help="Units for radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+                                                           help="Units for width in Rectanguñar Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
     extract_subcommand_raw_subsubcommand_rect.add_argument('--height-units', default='arcmin', type=str,
-                                                           help="Units for radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+                                                           help="Units for height in Rectangular Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
     extract_subcommand_raw_subsubcommand_rect.add_argument('--row-limit', type=int, default=-1,
                                                             help='Limit of rows/data to retrieve from Archive. Default = -1 (which means "NO LIMIT")')
     extract_subcommand_raw_subsubcommand_rect.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
@@ -164,6 +164,43 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_rect.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
     extract_subcommand_raw_subsubcommand_rect.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
     extract_subcommand_raw_subsubcommand_rect.add_argument('--no-save-raw-data', action="store_true", help="Do not save raw data")
+
+
+    # Sub-subcommand: extract - raw - annulus
+    str_extract_subcommand_raw_subsubcommand_ring = 'ring'
+    extract_subcommand_raw_subsubcommand_ring_example = f"example: {sys.argv[0]} extract raw annulus -ra '210' -dec '-i 7.0' -e 6.5"
+    extract_subcommand_raw_subsubcommand_ring = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_ring,
+                                                                                  help=f"{colors['RED']}Extract data in 'Annulus/Ring Search' mode{colors['NC']}",
+                                                                                  description=f"{colors['L_RED']}Extract data in annulus/ring shape/mode using 2 Cones with different radius{colors['NC']}",
+                                                                                  epilog=f"example: {sys.argv[0]} extract raw annulus ")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('-n', '--name', type=str, required=True,
+                                                           help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('-i', '--inner-radius', type=float, required=True,
+                                                           help="Inner radius cone to extract data. Default units: arcmin (see '--internal-units' to change this)")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('-e', '--external-radius', type=float, required=True,
+                                                           help="External/outer radius cone to extract data. Default units: arcmin (see '--external-units' to change this)")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--right-ascension', type=str,
+                                                           help="Right ascension J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--declination', type=str,
+                                                           help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('-o', '--outfile', help="output file")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('-x', '--file-extension', type=str, default="dat",
+                                                           help="Extension for the output file. Default = '.dat'")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--gaia-release', default='gdr3', type=str,
+                                                           help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--inner-rad-units', default='arcmin', type=str,
+                                                           help="Units for Inner Radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--external-rad-units', default='arcmin', type=str,
+                                                           help="Units for External Radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--row-limit', type=int, default=-1,
+                                                            help='Limit of rows/data to retrieve from Archive. Default = -1 (which means "NO LIMIT")')
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                           help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
+    extract_subcommand_raw_subsubcommand_ring.add_argument('--no-save-raw-data', action="store_true", help="Do not save raw data")
 
     ### 'plot' command
     str_plot_command: str = 'plot'
@@ -322,7 +359,6 @@ def randomChar() -> str:
     return random.choices(char_list, weights=weight_list,k=1)[0]
 
 
-
 #######################
 ## show-gaia-content ##
 #######################
@@ -390,6 +426,7 @@ def print_table(body_table, headers_table, max_allowed_length, table_format):
           headers=headers_table, tablefmt=table_format, 
           maxcolwidths=[None, None, None, None, max_allowed_length]))
 
+
 def select_gaia_astroquery_service(service_requested: str) -> str:
     """
     Check the service the user wants to use
@@ -407,7 +444,7 @@ def select_gaia_astroquery_service(service_requested: str) -> str:
     return service
     
 
-def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
+def get_data_via_astroquery(args, object_info, mode, purpose='normal'):
     #(args, input_ra, input_dec, mode)
     """
     Get data applying a query to Astroquery
@@ -428,8 +465,8 @@ def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
     # Mode for "normal" cone search
     if purpose == 'normal' and mode == 'cone':
         # Get the coordinates of the object in degrees
-        input_ra = RA
-        input_dec = DEC
+        input_ra = object_info.RA
+        input_dec = object_info.DEC
         # Get the units for the radius, and check if the radius is valid (positive number)
         radius_units = decide_units_parameter(args.radii, args.radius_units) 
         # Check if the user has provided a valid number of rows to extract
@@ -438,16 +475,30 @@ def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
         input_rows = args.row_limit
     # Mode for "normal" rectangle search
     if purpose == 'normal' and mode == 'rectangle':
-        input_ra = RA
-        input_dec = DEC
+        input_ra = object_info.RA
+        input_dec = object_info.DEC
         width_units = decide_units_parameter(args.width, args.width_units)
         height_units = decide_units_parameter(args.height, args.height_units)
         check_number_of_rows_provided(args.row_limit)
         input_width = args.width
         input_height = args.height
         input_rows = args.row_limit
-        
-                
+    # Mode for "normal" ring search
+    if purpose == 'normal' and mode == 'ring':
+        # For an annulus/ring, first get the parameters for the external radius
+        # Get RA, DEC for the object
+        input_ra = object_info.RA
+        input_dec = object_info.DEC
+        # Get the value and units for the external radius
+        external_radius_units = decide_units_parameter(args.external_radius, args.external_rad_units)
+        external_radius = args.external_radius
+        # Check the number of row limit is valid
+        check_number_of_rows_provided(args.row_limit)
+        input_rows = args.row_limit
+        # Get the values for inner radius and its units
+        inner_radius_units = decide_units_parameter(args.inner_radius, args.inner_rad_units)
+        inner_radius = args.inner_radius
+        check_if_inner_and_ext_radius_are_valid(external_radius*external_radius_units, inner_radius*inner_radius_units)
 
     if mode == 'cone':
         ### Get data via Astroquery
@@ -475,7 +526,7 @@ def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
         ### Get data via Astroquery
         Gaia.MAIN_GAIA_TABLE = service 
         Gaia.ROW_LIMIT = input_rows 
-        p = log.progress(f'{colors["L_GREEN"]}Requesting data')
+        p = log.progress(f'{colors["L_GREEN"]}Requesting data{colors["NC"]}')
         logging.getLogger('astroquery').setLevel(logging.WARNING)
         # Make request to the service
         try:
@@ -491,15 +542,81 @@ def get_data_via_astroquery(args, RA, DEC, mode, purpose='normal'):
 
         p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
         return r
+    if mode == 'ring':
+        ### Get data via Astroquery
+        Gaia.MAIN_GAIA_TABLE = service 
+        Gaia.ROW_LIMIT = input_rows
+        p = log.progress(f"{colors['L_GREEN']}Requesting data{colors['NC']}")
+        logging.getLogger('astroquery').setLevel(logging.WARNING)
+        # Make request to the service
+        try:
+            # First, make the request for the external radius, which is a normal cone
+            p.status(f"{colors['PURPLE']}Querying table for '{service.replace('.gaia_source', '')}' service...{colors['NC']}")
+            coord = SkyCoord(ra=input_ra, dec=input_dec, unit=(u.degree, u.degree), frame='icrs')
+            radius = u.Quantity(external_radius, external_radius_units)
+            j = Gaia.cone_search_async(coord, radius)         
+            logging.getLogger('astroquery').setLevel(logging.INFO)
+        except:
+            p.failure(f"{colors['RED']}Error while trying to request data for cone (external radius for ring){colors['NC']}")
+            sys.exit(1)
+        # Get the final data to display its columns as a table
+        r = j.get_results()
+        # Create a mask that filters data which is inside inner radius. So it excludes it
+        inner_radius_mask = create_mask_for_inner_radius(r, input_ra, input_dec, inner_radius, inner_radius_units, p)
+        final_data = r[inner_radius_mask]
+        p.success(f"{colors['L_GREEN']}Data obtained!{colors['NC']}")
+        return final_data
 
 
-
-def get_data_via_astroquery_rect(input_service, input_ra, input_dec, input_width, input_height, 
-                                 coords_units, radius_units, input_rows):
+def check_if_inner_and_ext_radius_are_valid(external_value, inner_value) -> None:
     """
-    Get data applying a query to Astroquery using "cone search"
+    Check if the user provides a inner radius bigger than external radius for a ring, which cannot be possible
     """
-    pass
+    if external_value > inner_value:
+        return
+    else:
+        print(f"{warning} {colors['RED']}The inner radius you provided ('{inner_value}') cannot be bigger than external radius ('{external_value}'{colors['NC']})")
+        sys.exit(1)
+
+
+def projected_distance_in_sky(point1_ra, point1_dec, point2_ra, point2_dec):
+    """
+    Projected distance in Sky
+    """
+    c1 = SkyCoord(point1_ra, point1_dec, unit=(u.degree, u.degree), frame='icrs')
+    c2 = SkyCoord(point2_ra, point2_dec, unit=(u.degree, u.degree), frame='icrs')
+    return c1.separation(c2) # separation in 'deg'
+
+
+def print_percentage(total, current_value) ->str:
+    """
+    Simple function to print percentage process
+    """
+    return f"{current_value/total * 100.:.2f}%"
+
+
+def create_mask_for_inner_radius(original_data, coord_ra, coord_dec, inner_radius, inner_radius_units, p, nsteps=400):
+    message = f"{colors['GREEN']}Creating ring/annulus from Cone Search...{colors['NC']}"
+    p.status(message)
+    # Give 2 seconds to read the message
+    time.sleep(2)
+    filter_mask = []
+    original_length = len(original_data)
+    for index, element in enumerate(original_data):
+        projected_distance = projected_distance_in_sky(element['ra'], element['dec'], coord_ra, coord_dec) 
+        # Check if the distance of the object is minor than the inner radius
+        # If it is, exclude that data; otherwise include it
+        if projected_distance < inner_radius*inner_radius_units:
+            filter_mask.append(False)
+        else:
+            filter_mask.append(True)
+        # Print process every 400 steps
+        if index%nsteps == 0:
+            p.status(f"{message} ({colors['PURPLE']}{print_percentage(original_length, index)}{colors['NC']})")
+    if original_length != len(filter_mask):
+        print(f"{warning} {colors['RED']}The Mask used to filter Inner Radius data has a different size ({len(filter_mask)}) compared to original data ({len(original_data)}){colors['NC']}.")
+        sys.exit(1)
+    return filter_mask
 
 
 def get_content_table_to_display(data):
@@ -520,7 +637,6 @@ def get_content_table_to_display(data):
         # If no description is provided, say it
         if isinstance(data[prop].info.description, type(None)):
             data[prop].info.description = "No description provided"
-        
         output_list.append(f'{j+1} | {data[prop].info.name} | {data[prop].info.dtype} | {data[prop].info.unit} | {data[prop].info.description}')
     return output_list
 
@@ -532,8 +648,10 @@ def showGaiaContent(args) -> None:
     displaySections('show-gaia-content', randomColor(), randomChar())
     # Get table format to display the content
     table_format = args.table_format
+    # Create a random 'objectInfo' object just to fill
+    object_example = objectInfo(name='', RA=280, DEC=-60, identifiedAs="Other")
     # Get an example data
-    data = get_data_via_astroquery(args, 280, -60, 'cone', 'content')
+    data = get_data_via_astroquery(args, object_example, 'cone', 'content')
     # Get the data into a table format
     output_list = get_content_table_to_display(data)
     # To display the table first we need to get terminal width
@@ -1190,9 +1308,11 @@ def extractRawData(args, search_mode_var: str):
     start_time = time.time()
     # Get data via astroquery
     if search_mode_var == "cone":
-        raw_data = get_data_via_astroquery(args, object_info.RA, object_info.DEC, 'cone', 'normal')
+        raw_data = get_data_via_astroquery(args, object_info, 'cone', 'normal')
     if search_mode_var == "rect":
-        raw_data = get_data_via_astroquery(args, object_info.RA, object_info.DEC, 'rectangle', 'normal')
+        raw_data = get_data_via_astroquery(args, object_info, 'rectangle', 'normal')
+    if search_mode_var == "ring":
+        raw_data = get_data_via_astroquery(args, object_info, 'ring', 'normal')
     if not args.no_print_data_requested:
         # Print the data obtained 
         print_data_requested(raw_data, start_time)
@@ -1208,8 +1328,10 @@ def extractRawData(args, search_mode_var: str):
 
 
 
-
 def extractCommand(args)->None:
+    """
+    If the user has selected the command "extract - raw" choose the mode to extract data
+    """
     # 'raw' subcommand
     if args.subcommand == "raw":
         # 'cone' subcommand
@@ -1217,6 +1339,8 @@ def extractCommand(args)->None:
             raw_data = extractRawData(args, "cone")
         if args.subsubcommand == "rectangle":
             raw_data = extractRawData(args, "rect")
+        if args.subsubcommand == "ring":
+            raw_Data = extractRawData(args, "ring")
 
 
 
