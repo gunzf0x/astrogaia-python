@@ -9,6 +9,7 @@ from astroquery.gaia import Gaia
 from astropy.coordinates.name_resolve import NameResolveError
 from astropy.units.core import UnitsError
 from astropy.coordinates import Angle
+from astropy.table import Table
 from pwn import log
 import shutil
 from tabulate import tabulate
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 import requests
 from pathlib import Path
 import signal
+import copy
 
 
 # ANSI escape codes dictionary
@@ -113,7 +115,7 @@ def parseArgs():
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-o', '--outfile', type=str,
                                                            help="Output filename to save data. File extension is automatically added, so '-o example' creates 'example.dat' file")
-    extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--file-extension', type=str, default="dat",
+    extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--outfile-extension', type=str, default="dat",
                                                            help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_cone.add_argument('--gaia-release', default='gdr3', type=str,
@@ -147,7 +149,7 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_rect.add_argument('--declination', type=str,
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_rect.add_argument('-o', '--outfile', help="output file")
-    extract_subcommand_raw_subsubcommand_rect.add_argument('-x', '--file-extension', type=str, default="dat",
+    extract_subcommand_raw_subsubcommand_rect.add_argument('-x', '--outfile-extension', type=str, default="dat",
                                                            help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_rect.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_rect.add_argument('--gaia-release', default='gdr3', type=str,
@@ -168,11 +170,11 @@ def parseArgs():
 
     # Sub-subcommand: extract - raw - annulus
     str_extract_subcommand_raw_subsubcommand_ring = 'ring'
-    extract_subcommand_raw_subsubcommand_ring_example = f"example: {sys.argv[0]} extract raw annulus -ra '210' -dec '-i 7.0' -e 6.5"
+    extract_subcommand_raw_subsubcommand_ring_example = f"example: {sys.argv[0]} extract raw ring -ra '210' -dec '-60.5' -i 7.0 -e 6.5"
     extract_subcommand_raw_subsubcommand_ring = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_ring,
                                                                                   help=f"{colors['RED']}Extract data in 'Annulus/Ring Search' mode{colors['NC']}",
                                                                                   description=f"{colors['L_RED']}Extract data in annulus/ring shape/mode using 2 Cones with different radius{colors['NC']}",
-                                                                                  epilog=f"example: {sys.argv[0]} extract raw annulus ")
+                                                                                  epilog=f"example: {extract_subcommand_raw_subsubcommand_ring_example}")
     extract_subcommand_raw_subsubcommand_ring.add_argument('-n', '--name', type=str, required=True,
                                                            help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
     extract_subcommand_raw_subsubcommand_ring.add_argument('-i', '--inner-radius', type=float, required=True,
@@ -184,7 +186,7 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_ring.add_argument('--declination', type=str,
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_ring.add_argument('-o', '--outfile', help="output file")
-    extract_subcommand_raw_subsubcommand_ring.add_argument('-x', '--file-extension', type=str, default="dat",
+    extract_subcommand_raw_subsubcommand_ring.add_argument('-x', '--outfile-extension', type=str, default="dat",
                                                            help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_ring.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_ring.add_argument('--gaia-release', default='gdr3', type=str,
@@ -201,6 +203,75 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_ring.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
     extract_subcommand_raw_subsubcommand_ring.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
     extract_subcommand_raw_subsubcommand_ring.add_argument('--no-save-raw-data', action="store_true", help="Do not save raw data")
+
+    # Sub-command extract - filter
+    str_extract_subcommand_filter: str = 'filter'
+    extract_filter_subcommand_help = f"{colors['L_BLUE']}Filter Gaia data applying different methods{colors['NC']}"
+    extract_subcommand_filter = parser_sub_extract.add_parser(str_extract_subcommand_filter, description=extract_filter_subcommand_help,
+                                                           help=f"{colors['BLUE']}Filter Gaia data applying different methods{colors['NC']}",
+                                                           epilog=f"example: {sys.argv[0]} extract filter parameters")
+
+    # Sub-subcommand: extract - filter - parameters
+    extract_filter_parameters_subsubcommand_help = f"{colors['BLUE']}Filter data based on parameters values in Gaia data{colors['NC']}"
+    parser_sub_filter_parameters = extract_subcommand_filter.add_subparsers(dest='subsubcommand', help=f"{extract_filter_parameters_subsubcommand_help}")
+
+    str_extract_subcommand_filter_subsubcommand_parameters = 'parameters'
+    epilog_str_extract_filter_parameters_example = rf'''examples: {sys.argv[0]} extract filter cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
+          {sys.argv[0]} extract raw cone --right-ascension "210" --declination "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, but you have to provide coords{colors["NC"]}
+          {sys.argv[0]} extract raw cone --right-ascension="20h50m45.7s" --declination="-5d23m33.3s" -r=3.3 {colors["GRAY"]}# Search for negative coordinates{colors["NC"]}
+          '''
+    extract_subcommand_filter_subsubcommand_parameters = parser_sub_filter_parameters.add_parser(str_extract_subcommand_filter_subsubcommand_parameters,
+                                                                                  help=extract_filter_parameters_subsubcommand_help,
+                                                                                  description=f"{colors['RED']}Filter Gaia data based on parameters returned in data{colors['NC']}",
+                                                                                  epilog=epilog_str_extract_filter_parameters_example, 
+                                                                                  formatter_class=argparse.RawTextHelpFormatter)
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('-f', '--file', type=str,
+                                                           help="File containing data to read, extract and filter.\nIf not provided, name, radius, RA, and DEC parameters are required.\nData will be directly extracted from Archive in 'Cone' Search mode.")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('-n', '--name', type=str,
+                                                           help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'.\nNot required if you provide a file containing data.")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('-r', '--radii', type=float,
+                                                           help="Radius to extract data. Default units: arcmin (see '--radius-units' to change this).\nNot required if you provide a file containing data.")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--right-ascension', type=str,
+                                                           help="Right ascension J2000 coordinates center. Default units: degrees.\nNot required if you provide a file containing data.")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--declination', type=str,
+                                                           help="Declination J2000 coordinates center. Default units: degrees.\nNot required if you provide a file containing data.")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('-d', '--file-format', type=str, default='ascii.ecsv',
+                                                           help="File format to read file containing data. Default: 'asci.ecsv'")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('-o', '--outfile', type=str,
+                                                           help="Output filename to save data output. File extension is automatically added, so '-o example' creates 'example.dat' file")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('-x', '--outfile-extension', type=str, default="dat",
+                                                           help="Extension for the output file. Default = '.dat'")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--filter-by-ruwe', type=float, default=1.4,
+                                                                    help="Filter by Renormalised unit weight error (RUWE).\nOnly keep lower values than the filter value. Default: 1.4")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--filter-by-pm-error', type=float, default=0.35,
+                                                                    help="Filter by Proper Motions errors (RA and DEC components).\nOnly keep lower values than the filter value. Default: 0.35 mas/yr")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--filter-by-g-rp-max', type=float, default=19.5,
+                                                                    help="Filter by max G_RP allowed magnitude.\nOnly keep lower values than the filter value. Default: 19.5 mag")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--filter-by-g-rp-min', type=float, default=10.5,
+                                                                    help="Filter by min G_RP allowed magnitude.\nOnly keep higher values than the filter value. Default: 10.5 mag")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--skip-extra-data', action="store_true", 
+                                                           help='Skip online Gaia-based extra data for your object')
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--gaia-release', default='gdr3', type=str,
+                                                           help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--radius-units', default='arcmin', type=str,
+                                                           help="Units for radius in Cone Search. Options: {arcsec, arcmin, degree} (Default: arcmin)")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--row-limit', type=int, default=-1,
+                                                            help='Limit of rows/data to retrieve from Archive. Default = -1 (which means "NO LIMIT")')
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                           help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--no-save-output', action="store_true", help="Do not save data output")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--no-filter-ruwe', action="store_true",
+                                                           help="Do not apply filter by Renormalised unit weight error (RUWE)")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--no-filter-pm-error', action="store_true",
+                                                           help="Do not apply filter by Proper Motion errors (both components, RA and DEC)")
+    extract_subcommand_filter_subsubcommand_parameters.add_argument('--no-filter-g-rp', action="store_true",
+                                                           help="Do not apply filter by G_RP magnitude")
+
+ 
+
 
     ### 'plot' command
     str_plot_command: str = 'plot'
@@ -260,6 +331,8 @@ def checkUserHasProvidedArguments(parser_provided, args_provided, n_args_provide
     if args_provided.command == "extract" and args_provided.subcommand == "raw" and n_args_provided == 3:
         parser_provided.parse_args(['extract', 'raw', '-h'])
 
+    if args_provided.command == "extract" and args_provided.subcommand == "filter" and n_args_provided == 3:
+        parser_provided.parse_args(['extract', 'filter', '-h'])
 
     if args_provided.command == "extract" and args_provided.subcommand == "raw" and args_provided.subsubcommand=="rectangle" and n_args_provided == 4:
         parser_provided.parse_args(['extract', 'raw', 'rectangle', '-h'])
@@ -299,6 +372,9 @@ def printBanner() -> None:
     rand_number2 = random.randint(31,36) 
     c2 = f'\033[1;{rand_number2}m' # color
     sh2 = f'\033[{rand_number2}m' # shadow
+    rand_number3 = random.randint(31,36) 
+    c3 = f'\033[1;{rand_number3}m' # color
+
 
     banner = rf'''   {c}_____            __{nc}                  
  {c} /  {sh}_  {c}\   _______/  |________  ____{nc}  
@@ -314,8 +390,9 @@ def printBanner() -> None:
 {c2}            \/     \/        \/{nc} {colors['GRAY']} {script_version}{nc}
     '''
     print(banner)
-    print(f"\n{' ' * 11}by {colors['L_CYAN']}Francisco Carrasco Varela{colors['NC']}")
-    print(f"{' ' * 21}{colors['CYAN']}(ffcarrasco@uc.cl){colors['NC']}\n\n")
+    print(f"\n{' ' * 11}by {c3}Francisco Carrasco Varela{nc}")
+    print(f"{' ' * 6}{c3} P. Universidad Católica de Chile{nc}")
+    print(f"{' ' * 21}{c3}(ffcarrasco@uc.cl){nc}\n")
     return
 
 
@@ -504,7 +581,7 @@ def get_data_via_astroquery(args, object_info, mode, purpose='normal'):
         ### Get data via Astroquery
         Gaia.MAIN_GAIA_TABLE = service 
         Gaia.ROW_LIMIT = input_rows 
-        p = log.progress(f'{colors["L_GREEN"]}Requesting data')
+        p = log.progress(f'{colors["L_GREEN"]}Requesting data{colors["NC"]}')
         logging.getLogger('astroquery').setLevel(logging.WARNING)
 
         # Make request to the service
@@ -639,6 +716,28 @@ def get_content_table_to_display(data):
             data[prop].info.description = "No description provided"
         output_list.append(f'{j+1} | {data[prop].info.name} | {data[prop].info.dtype} | {data[prop].info.unit} | {data[prop].info.description}')
     return output_list
+
+
+def check_if_filename_flag_was_provided(args)->bool | None:
+    """
+    Check if the user has provided a filename. If not, check if other needed flags has been provided and can be
+    used in its place
+    """
+    # If the user has provided a filename, we can just continue
+    if args.file is not None:
+        return True
+    # If the user has not provided it, then we will have to if some flags has been provided
+    if args.file is None:
+        print(f"{sb} {colors['PURPLE']}Filename not provided ('-f'). Attempting to use other parameters provided...{colors['NC']}")
+    if args.name is None:
+        print(f"{warning} {colors['RED']}No name provided to object ('-n' or '--name'). Provide a valid value to this parameter and retry.{colors['NC']}")
+        sys.exit(1)
+    if args.radii is None:
+        print(f"{warning} {colors['RED']}No radius provided ('-r' or '--radii'). Provide a valid value to this parameter and retry.{colors['NC']}")
+        sys.exit(1)
+    # If the user has provided all of these parameters, then just return a boolean 
+    # to indicate we will have to use them in future steps
+    return False
 
 
 def showGaiaContent(args) -> None:
@@ -1119,7 +1218,7 @@ def get_RA_and_DEC(args):
     return object_info
 
 
-def print_data_requested(data, start_time, show_n_rows=12):
+def print_data_requested(data, start_time, show_n_rows=13):
     """
     Print the data that has been extracted via Astroquery using pprint
     """
@@ -1204,8 +1303,9 @@ def get_Object_directory(args, object_path, obj_name, objectIdentifiedAs):
 
 def shortened_path(full_path: str) -> str:
     """
-    Shorten a path if the string is too large
+    Shorten a path if it is too large to print a shorter string
     """
+    # Split the path into "/"
     list_path = full_path.split('/')
     # Delete elements that are 'null'/empty strings
     list_path = [element for element in list_path if element]
@@ -1218,7 +1318,7 @@ def shortened_path(full_path: str) -> str:
     return short_path
     
 
-def where_to_save_data(args, command, mode, p, objectIdentifiedAs)->str:
+def where_to_save_data_if_found_in_Archive(args, command, mode, p, object_info)->str:
     if not args.outfile:
         working_dir_file_exists, working_dir = check_if_save_file_exists()
         if working_dir_file_exists:
@@ -1226,16 +1326,16 @@ def where_to_save_data(args, command, mode, p, objectIdentifiedAs)->str:
             print("File exists")
         else:
             current_path = Path.cwd()
-        object_path_to_save = get_Object_directory(args, current_path, args.name, objectIdentifiedAs)
-        filename = f"{args.name.replace(' ', '_').lower()}_{command}_{mode}.{args.file_extension}"
+        object_path_to_save = get_Object_directory(args, current_path, object_info.name, object_info.identifiedAs)
+        filename = f"{object_info.name.replace(' ', '_').lower()}_{command}_{mode}.{args.outfile_extension}"
         filename = f"{object_path_to_save}/{filename}"
         p.status(f"{colors['YELLOW']}No outfile name provided in input. {colors['GREEN']}Data will be saved as\n'{colors['L_BLUE']}{filename}{colors['GREEN']}'\ninto working directory ('{shortened_path(str(current_path))}'){colors['NC']}{colors['NC']}")
         return filename
     if args.outfile:
-        if args.outfile.endswith(args.file_extension):
-            filename = f"{replace_last_ocurrence_word(args.outfile, f'.{args.file_extension}', '')}_{command}_{mode}.{args.file_extension}"
+        if args.outfile.endswith(args.outfile_extension):
+            filename = f"{replace_last_ocurrence_word(args.outfile, f'.{args.outfile_extension}', '')}_{command}_{mode}.{args.outfile_extension}"
         else:
-            filename = f"{args.outfile}_{command}_{mode}.{args.file_extension}"
+            filename = f"{args.outfile}_{command}_{mode}.{args.outfile_extension}"
         # Convert to a Path object
         path = Path(filename)
         current_path = Path.cwd()
@@ -1274,10 +1374,79 @@ def ask_to(ask_text: str, max_attempts=10)->bool | None:
         sys.exit(1)
 
 
-def save_data_output(args, command, mode, objectIdentifiedAs, data):
+def print_before_and_after_filter_length(original_length: int, filtered_length: int, n_prints=40)->None:
+    pick_color = randomColor()
+    random_char = randomChar()
+    separator = f"{pick_color}{random_char*n_prints}{colors['NC']}"
+    print()
+    print(separator)
+    print(f"  -> Original data length: {colors['PURPLE']}{original_length}{colors['NC']}")
+    print(f"  -> Filtered data length: {colors['BLUE']}{filtered_length}{colors['NC']}")
+    print(f"     \"Survival\" data:      {colors['BLUE']}{((filtered_length/original_length)*100):.2f}%{colors['NC']}")
+    print(separator)
+    print()
+    return
+
+
+def get_filename_in_list(word_to_split_in_a_list, char_to_split: str = '_'):
+    """
+    Searches for the words 'raw' or 'filtered' that should be separated by '_' characters in filename.
+    For example, "my_example_raw" when separated/splitted by '_' chars, raw will be in position 2.
+    Therefore we use the name of the object as everything that was before position 2; in our
+    example the name then would be "my_example".
+    If no word 'raw' or 'filtered' is present in filename, then just return the original string.
+    """
+    list_split = word_to_split_in_a_list.split(char_to_split)
+    position = 0
+    found = False
+    for index, element in enumerate(list_split):
+        if element.lower() == 'raw':
+            position = index
+            found = True
+            break
+        elif element.lower() == 'filter':
+            position = index
+            found = True
+            break
+    if found:
+        name_list = list_split[:position]
+        filename_without_extension = "_".join(map(str, name_list))
+        return filename_without_extension
+    else:
+        return word_to_split_in_a_list.replace(' ','_')
+
+
+def decide_identifiedAs_based_on_abs_path(file_Path_object)->str:
+    full_path = file_Path_object.resolve()
+    file_origin_directory = str(full_path.parent)
+    if 'globularcluster' in file_origin_directory.lower():
+        return 'GlobularCluster'
+    elif 'opencluster' in file_origin_directory.lower():
+        return 'OpenCluster'
+    else:
+        return 'Other'
+    
+
+def decide_parameters_to_save_data(args, object_info: objectInfo | None):
+    """
+    Decides where to save a file based on if it was provided reading a file or using Archives
+    """
+    # If the data was obtained reading a file, object_info will be None
+    if object_info is None and args.file is not None:
+        file_Path_object = Path(args.file)
+        filename_original_without_extension = str(file_Path_object.stem)
+        # Get the object name 
+        obj_name = get_filename_in_list(filename_original_without_extension)
+        # Based on where is saved the file provided, get if it is a Glob Cluster, Open Cluster, or Other
+        new_object = objectInfo(name=obj_name, RA=0, DEC=0., identifiedAs=decide_identifiedAs_based_on_abs_path(file_Path_object))
+        return new_object
+    else:
+        return object_info
+
+
+def save_data_output(args, command, mode, object_info, data):
     p = log.progress(f"{colors['L_GREEN']}Saving data{colors['NC']}")
-    filename = where_to_save_data(args, command, mode, p, objectIdentifiedAs)
-    #p.success("we did it!")
+    filename = where_to_save_data_if_found_in_Archive(args, command, mode, p, object_info)
     # If the user explicitly wants to replace the file, skip the step checking this
     if not args.force_overwrite_outfile:
         file_path = Path(filename)
@@ -1298,12 +1467,133 @@ def save_data_output(args, command, mode, objectIdentifiedAs, data):
     p.success(f"{colors['GREEN']}Data saved{colors['NC']}")
 
 
+def filter_data_with_parameter(data, parameter, p, min_value=None, max_value=None):
+    # Filter by parameter between 2 values
+    if min_value is not None and max_value is not None:
+        try:
+            # First filter by min value
+            mask_filter =  min_value <= data[parameter]
+            data = data[mask_filter]
+            # Then filter by max value
+            mask_filter = data[parameter] <= max_value
+            data = data[mask_filter]
+            return data
+        except KeyError:
+            print(f"{warning} {colors['RED']}You have provided an invalid parameter that could not be found in Gaia data: '{parameter}' {colors['NC']}")
+            print(f"    {colors['PURPLE']}Check columns with '{colors['BLUE']}{sys.argv[0]} show-gaia-content{colors['PURPLE']}' command to see available and valid parameters{colors['NC']}")
+            p.failure(f"{colors['RED']}Data could not be retrieved{colors['NC']}")
+            sys.exit(1)
+    elif min_value is not None:
+        try:
+            mask_filter =  min_value <= data[parameter]
+            data = data[mask_filter]
+            return data
+        except KeyError:
+            print(f"{warning} {colors['RED']}You have provided an invalid parameter that could not be found in Gaia data: '{parameter}' {colors['NC']}")
+            print(f"    {colors['PURPLE']}Check columns with '{colors['BLUE']}{sys.argv[0]} show-gaia-content{colors['PURPLE']}' command to see available and valid parameters{colors['NC']}")
+            p.failure(f"{colors['RED']}Data could not be retrieved{colors['NC']}")
+            sys.exit(1)
+    elif max_value is not None:
+        try:
+            mask_filter =  data[parameter] <= max_value
+            data = data[mask_filter]
+            return data
+        except KeyError:
+            print(f"{warning} {colors['RED']}You have provided an invalid parameter that could not be found in Gaia data: '{parameter}' {colors['NC']}")
+            print(f"    {colors['PURPLE']}Check columns with '{colors['BLUE']}{sys.argv[0]} show-gaia-content{colors['PURPLE']}' command to see available and valid parameters{colors['NC']}")
+            p.failure(f"{colors['RED']}Data could not be retrieved{colors['NC']}")
+            sys.exit(1)
+    else:
+        print(f"{warning} {colors['RED']}No filters were applied{colors['NC']}")
+        return data
+  
 
-def extractRawData(args, search_mode_var: str):
+def apply_filter_to_data_with_parameters(args, data):
+    original_data_length = len(data)
+    p = log.progress(f"{colors['L_GREEN']}Filtering data{colors['NC']}")
+    # Make a deepcopy, so we do not modify the original data
+    copy_original_data = copy.deepcopy(data)
+    if not args.no_filter_ruwe:
+        p.status(f"{colors['GREEN']}Filtering data by RUWE (smaller than {args.filter_by_ruwe})...{colors['NC']}")
+        copy_original_data = filter_data_with_parameter(copy_original_data, 'ruwe', p, max_value=args.filter_by_ruwe)
+    if not args.no_filter_pm_error:
+        p.status(f"{colors['GREEN']}Filtering data by Proper Motion errors (smaller than {args.filter_by_pm_error} mas/yr)...{colors['NC']}")
+        copy_original_data = filter_data_with_parameter(copy_original_data, 'pmra_error', p, max_value=args.filter_by_pm_error)
+        copy_original_data = filter_data_with_parameter(copy_original_data, 'pmdec_error', p, max_value=args.filter_by_pm_error)
+    if not args.no_filter_g_rp:
+        p.status(f"{colors['GREEN']}Filtering data by G_RP magnitude ({args.filter_by_g_rp_min} < G_RP/mag < {args.filter_by_g_rp_max})...{colors['NC']}")
+        copy_original_data = filter_data_with_parameter(copy_original_data, 'phot_rp_mean_mag', p, 
+                                                        max_value=args.filter_by_g_rp_max, 
+                                                        min_value=args.filter_by_g_rp_min)
+    p.success("Data fully filtered")
+    return copy_original_data
+
+
+def get_data_from_file_or_query(args, subcommand, subsubcommand, showBanner=True):
+    """
+    Check if the user has provided a filename containing data. If not, the data is provided querying data to Gaia Archive
+    """
+    # Display a banner
+    if showBanner:
+        displaySections(f'extract -- {subcommand} -- {subsubcommand}', randomColor(), randomChar())
+    # Check if the user has provided a filename or not
+    isFileProvided = check_if_filename_flag_was_provided(args)
+    # If it was provided, use it to read data
+    if isFileProvided:
+        # Check if the filename the user provided exists
+        check_if_read_file_exists(args.file)
+        p = log.progress(f"{colors['L_GREEN']}Data{colors['NC']}")
+        p.status(f"{colors['PURPLE']}Reading data file '{shortened_path(args.file)}'...{colors['NC']}")
+        try:
+            original_data = Table.read(args.file, format=args.file_format)   
+        except Exception as e:
+            print(f"{warning} {colors['RED']}Unable to read '{args.file}' file with format '{args.file_format}'{colors['NC']}")
+            print(f"Exception details: {e}")
+            p.failure(f"{colors['RED']}Could not retrieve data from file{colors['NC']}")
+            sys.exit(1)
+        p.success(f"{colors['GREEN']}Succesfully obtained data from file{colors['NC']}")
+        return original_data, None
+    else:
+        checkNameObjectProvidedByUser(args.name)
+        original_data, object_info = extractRawData(args, 'filter', 'cone', enableSave=False, showBanner=False)
+        return original_data, object_info
+
+
+def check_if_read_file_exists(filename)->None:
+    """
+    Check if the file containing data provided by the user exists
+    """
+    read_file_path = Path(filename)
+    if not read_file_path.exists():
+        print(f"{warning} {colors['RED']}The filename you provided ('{colors['PURPLE']}{filename}{colors['RED']}') does not exist. Maybe you mispelled it?{colors['NC']}")
+        sys.exit(1)
+    return
+
+
+def extractFilterParameters(args, subcommand: str, subsubcommand: str):
+    original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
+    original_length = len(original_data)
+    filtered_data = apply_filter_to_data_with_parameters(args, original_data)
+    p = log.progress(f"{colors['PINK']}Saving data{colors['NC']}")
+    # If the user provided a file, try to obtain the "identifiedAs" parameter based on its path
+    object_info_identified = decide_parameters_to_save_data(args, object_info)
+    # Save data if needed
+    if not args.no_save_output:
+        print(f"{warning} {colors['RED']}Not saving data output (--no-save-output){colors['NC']}")
+        save_data_output(args, subcommand, subsubcommand, object_info_identified, filtered_data)
+        p.success(f"{colors['GREEN']}Data succesfully saved{colors['NC']}")
+    else:
+        p.failure(f"{colors['RED']}Data has not been saved{colors['NC']}")
+    print_before_and_after_filter_length(original_length, len(filtered_data))
+    return filtered_data
+
+
+def extractRawData(args, subcommand, search_mode_var: str, enableSave=True, showBanner=True):
     # Get coordiantes of the object in degrees
     object_info =  get_RA_and_DEC(args)
     # Display a message
-    displaySections(f'extract -- raw -- {search_mode_var}', randomColor(), randomChar())
+    if showBanner:
+        displaySections(f'extract -- {subcommand} -- {search_mode_var}', randomColor(), randomChar())
     # Start a timer to check execution time
     start_time = time.time()
     # Get data via astroquery
@@ -1313,34 +1603,43 @@ def extractRawData(args, search_mode_var: str):
         raw_data = get_data_via_astroquery(args, object_info, 'rectangle', 'normal')
     if search_mode_var == "ring":
         raw_data = get_data_via_astroquery(args, object_info, 'ring', 'normal')
-    if not args.no_print_data_requested:
-        # Print the data obtained 
-        print_data_requested(raw_data, start_time)
-    # Save data
-    if not args.no_save_raw_data:
-        save_data_output(args, 'raw', search_mode_var, object_info.identifiedAs, raw_data)
-    else:
-        print(f"{warning} Raw data extracted has not been saved")
-    #save_data_output(args, 'raw', 'cone', raw_data)
+    if enableSave:
+        if not args.no_print_data_requested:
+            # Print the data obtained 
+            print_data_requested(raw_data, start_time)
+        # Save data
+        if not args.no_save_raw_data:
+            save_data_output(args, subcommand, search_mode_var, object_info, raw_data)
+        else:
+            print(f"{warning} Raw data extracted has not been saved")
     # And we are done
     print(f"{sb} {colors['GREEN']}Data succesfully obtained from Archives{colors['NC']}")
-    return raw_data
-
+    return raw_data, object_info
 
 
 def extractCommand(args)->None:
     """
-    If the user has selected the command "extract - raw" choose the mode to extract data
+    If the user has selected the command "extract" choose the mode to extract data
     """
     # 'raw' subcommand
     if args.subcommand == "raw":
+        # Check that user has provided a valid format for name
+        checkNameObjectProvidedByUser(args.name)
         # 'cone' subcommand
         if args.subsubcommand == "cone":
-            raw_data = extractRawData(args, "cone")
+            raw_data,_ = extractRawData(args, "raw", "cone")
+            sys.exit(0)
         if args.subsubcommand == "rectangle":
-            raw_data = extractRawData(args, "rect")
+            raw_data,_ = extractRawData(args, "raw" ,"rect")
+            sys.exit(0)
         if args.subsubcommand == "ring":
-            raw_Data = extractRawData(args, "ring")
+            raw_Data,_ = extractRawData(args, "raw", "ring")
+            sys.exit(0)
+    # 'filter' subcommand
+    if args.subcommand == "filter":
+        if args.subsubcommand == "parameters":
+            filtered_data = extractFilterParameters(args, 'filter', 'parameters')
+            sys.exit(0)
 
 
 
@@ -1376,9 +1675,6 @@ def main() -> None:
 
     # Run 'extract' command
     if args.command == 'extract':
-        # Check that user has provided a valid format-name
-        checkNameObjectProvidedByUser(args.name)
-
         # Extract data using Astroquery
         extractCommand(args)
 
