@@ -5,3 +5,4 @@ scipy
 astropy
 astroquery[all]
 pwntools
+tqdm
