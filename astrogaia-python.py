@@ -15,6 +15,9 @@ import shutil
 from tabulate import tabulate
 import random
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.offsetbox import AnchoredText
+import matplotlib
 import re
 from typing import List
 import time
@@ -24,6 +27,8 @@ import requests
 from pathlib import Path
 import signal
 import copy
+import numpy as np
+from tqdm import tqdm
 
 
 # ANSI escape codes dictionary
@@ -60,7 +65,7 @@ def signal_handler(signal, frame):
     sys.exit(1)
 
 
-# Redirect the signal handler
+# Redirect the signal handler to trigger Ctrl-C custom function
 signal.signal(signal.SIGINT, signal_handler)
 
 
@@ -115,8 +120,6 @@ def parseArgs():
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_cone.add_argument('-o', '--outfile', type=str,
                                                            help="Output filename to save data. File extension is automatically added, so '-o example' creates 'example.dat' file")
-    extract_subcommand_raw_subsubcommand_cone.add_argument('-x', '--outfile-extension', type=str, default="dat",
-                                                           help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_cone.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_cone.add_argument('--gaia-release', default='gdr3', type=str,
                                                            help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
@@ -137,7 +140,7 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_rect = parser_sub_extract_raw.add_parser(str_extract_subcommand_raw_subsubcommand_rect,
                                                                                   help=f"{colors['RED']}Extract data in 'rectangle search' mode{colors['NC']}",
                                                                                   description=f"{colors['L_RED']}Extract data in rectangle shape/mode{colors['NC']}",
-                                                                                  epilog=f"example: {sys.argv[0]} extract raw rectangle ")
+                                                                                  epilog=extract_subcommand_raw_subsubcommand_rect_example)
     extract_subcommand_raw_subsubcommand_rect.add_argument('-n', '--name', type=str, required=True,
                                                            help="Object name. Ideally how it is found in catalogs and no spaces. Examples: 'NGC104', 'NGC_6121', 'Omega_Cen', 'myObject'")
     extract_subcommand_raw_subsubcommand_rect.add_argument('-w', '--width', type=float, required=True,
@@ -149,8 +152,6 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_rect.add_argument('--declination', type=str,
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_rect.add_argument('-o', '--outfile', help="output file")
-    extract_subcommand_raw_subsubcommand_rect.add_argument('-x', '--outfile-extension', type=str, default="dat",
-                                                           help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_rect.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_rect.add_argument('--gaia-release', default='gdr3', type=str,
                                                            help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
@@ -186,8 +187,6 @@ def parseArgs():
     extract_subcommand_raw_subsubcommand_ring.add_argument('--declination', type=str,
                                                            help="Declination J2000 coordinates center. Default units: degrees. Not required if you provide a name found in catalogs.")
     extract_subcommand_raw_subsubcommand_ring.add_argument('-o', '--outfile', help="output file")
-    extract_subcommand_raw_subsubcommand_ring.add_argument('-x', '--outfile-extension', type=str, default="dat",
-                                                           help="Extension for the output file. Default = '.dat'")
     extract_subcommand_raw_subsubcommand_ring.add_argument('--skip-extra-data', action="store_true", help='Skip online Gaia-based extra data for your object')
     extract_subcommand_raw_subsubcommand_ring.add_argument('--gaia-release', default='gdr3', type=str,
                                                            help="Select the Gaia Data Release you want to display what type of data contains\nValid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2} (Default: Gaia DR3)")
@@ -211,20 +210,22 @@ def parseArgs():
                                                            help=f"{colors['BLUE']}Filter Gaia data applying different methods{colors['NC']}",
                                                            epilog=f"example: {sys.argv[0]} extract filter parameters")
 
-    # Sub-subcommand: extract - filter - parameters
-    extract_filter_parameters_subsubcommand_help = f"{colors['BLUE']}Filter data based on parameters values in Gaia data{colors['NC']}"
-    parser_sub_filter_parameters = extract_subcommand_filter.add_subparsers(dest='subsubcommand', help=f"{extract_filter_parameters_subsubcommand_help}")
+    
+    extract_filter_subsubcommand_help = f"{colors['BLUE']}Filter data from Gaia{colors['NC']}"
+    parser_sub_filter = extract_subcommand_filter.add_subparsers(dest='subsubcommand', help=f"{extract_filter_subsubcommand_help}")
 
+    # Sub-subcommand: extract - filter - parameters
     str_extract_subcommand_filter_subsubcommand_parameters = 'parameters'
+    extract_filter_parameters_subsubcommand_help = f"{colors['PURPLE']}Filter Gaia data based on its parameters such as errors, magnitudes, etc{colors['NC']}"
     epilog_str_extract_filter_parameters_example = rf'''examples: {sys.argv[0]} extract filter cone -n "47 Tuc" -r 2.1 {colors["GRAY"]}# Extract data for "47 Tucanae" or "NGC104"{colors["NC"]}
           {sys.argv[0]} extract raw cone --right-ascension "210" --declination "-60" -r 1.2 -n "myObject" {colors["GRAY"]}# Use a custom name/object, but you have to provide coords{colors["NC"]}
           {sys.argv[0]} extract raw cone --right-ascension="20h50m45.7s" --declination="-5d23m33.3s" -r=3.3 {colors["GRAY"]}# Search for negative coordinates{colors["NC"]}
           '''
-    extract_subcommand_filter_subsubcommand_parameters = parser_sub_filter_parameters.add_parser(str_extract_subcommand_filter_subsubcommand_parameters,
-                                                                                  help=extract_filter_parameters_subsubcommand_help,
-                                                                                  description=f"{colors['RED']}Filter Gaia data based on parameters returned in data{colors['NC']}",
-                                                                                  epilog=epilog_str_extract_filter_parameters_example, 
-                                                                                  formatter_class=argparse.RawTextHelpFormatter)
+    extract_subcommand_filter_subsubcommand_parameters = parser_sub_filter.add_parser(str_extract_subcommand_filter_subsubcommand_parameters,
+                                                                                      help=extract_filter_parameters_subsubcommand_help,
+                                                                                      description=f"{colors['RED']}Filter Gaia data based on parameters returned in data{colors['NC']}",
+                                                                                      epilog=epilog_str_extract_filter_parameters_example, 
+                                                                                      formatter_class=argparse.RawTextHelpFormatter)
     extract_subcommand_filter_subsubcommand_parameters.add_argument('-f', '--file', type=str,
                                                            help="File containing data to read, extract and filter.\nIf not provided, name, radius, RA, and DEC parameters are required.\nData will be directly extracted from Archive in 'Cone' Search mode.")
     extract_subcommand_filter_subsubcommand_parameters.add_argument('-n', '--name', type=str,
@@ -238,9 +239,7 @@ def parseArgs():
     extract_subcommand_filter_subsubcommand_parameters.add_argument('-d', '--file-format', type=str, default='ascii.ecsv',
                                                            help="File format to read file containing data. Default: 'asci.ecsv'")
     extract_subcommand_filter_subsubcommand_parameters.add_argument('-o', '--outfile', type=str,
-                                                           help="Output filename to save data output. File extension is automatically added, so '-o example' creates 'example.dat' file")
-    extract_subcommand_filter_subsubcommand_parameters.add_argument('-x', '--outfile-extension', type=str, default="dat",
-                                                           help="Extension for the output file. Default = '.dat'")
+                                                           help="Output filename to save data output.")
     extract_subcommand_filter_subsubcommand_parameters.add_argument('--filter-by-ruwe', type=float, default=1.4,
                                                                     help="Filter by Renormalised unit weight error (RUWE).\nOnly keep lower values than the filter value. Default: 1.4")
     extract_subcommand_filter_subsubcommand_parameters.add_argument('--filter-by-pm-error', type=float, default=0.35,
@@ -270,7 +269,44 @@ def parseArgs():
     extract_subcommand_filter_subsubcommand_parameters.add_argument('--no-filter-g-rp', action="store_true",
                                                            help="Do not apply filter by G_RP magnitude")
 
- 
+
+    # Sub-subcommand: extract - filter - ellipse
+    str_extract_subcommand_filter_subsubcommand_ellipse = 'ellipse'
+    extract_subcommand_filter_subsubcommand_ellipse_example = f"example: {sys.argv[0]} extract filter ellipse -f ngc104_raw.dat --width 5.5 10.2 --height 6.6 7.2"
+    extract_subcommand_filter_subsubcommand_ellipse = parser_sub_filter.add_parser(str_extract_subcommand_filter_subsubcommand_ellipse,
+                                                                                  help=f"{colors['RED']}Extract data within an ellipse in Vector Point Diagram{colors['NC']}",
+                                                                                  description=f"{colors['L_RED']}Extract data in annulus/ring shape/mode using 2 Cones with different radius{colors['NC']}",
+                                                                                  epilog=extract_subcommand_filter_subsubcommand_ellipse_example,
+                                                                                  formatter_class=argparse.RawTextHelpFormatter)
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('-f', '--file', type=str, required=True,
+                                                           help="File containing data to read, extract and filter.")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--pmra', type=float,
+                                                           help="Coordinate in Proper Motion along RA (mas/yr) where the ellipse is centered in VPD.\nRequired if you are using a \"custom\" object not obtained in GCs or OCs catalogues.")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--pmdec', type=float,
+                                                           help="Coordinate in Proper Motion along DEC (mas/yr) where the ellipse is centered in VPD.\nRequired if you are using a \"custom\" object not obtained in GCs or OCs catalogues.")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('-w', '--width', type=float, nargs='+', required=True,
+                                                                 help="Minimum and maximum width to create ellipses. Example: '--width 15. 25.'\n'Width' is the axis along PMRA coordinate in VPD in 'mas/yr' units")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('-ht', '--height', type=float, nargs='+', required=True,
+                                                                 help="Minimum and maximum height to create ellipses. Example: '--height 15. 30.'\n'Height' is the axis along PMDEC coordinate in VPD in 'mas/yr' units")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('-i', '--inclination', type=float, nargs='+', default=[-90.0, 90.0],
+                                                                 help="Minimum and maximum angle inclination to create ellipses. Example: '--inclination -89. 89.'\n'Inclination' is the angle between the Y-axis and the width axis counterclockwise in VPD")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('-d', '--file-format', type=str, default='ascii.ecsv',
+                                                           help="File format to read file containing data. Default: 'asci.ecsv'")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('-o', '--outfile', type=str,
+                                                           help="Output filename to save data output.")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--n-divisions-in-width', type=int, default=10,
+                                                           help="The program will create an ellipse bewteen the minimum and maximum value of width N times. Default=10")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--n-divisions-in-height', type=int, default=10,
+                                                           help="The program will create an ellipse bewteen the minimum and maximum value of height N times. Default=10")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--n-divisions-in-inclination', type=int, default=360,
+                                                           help="The program will create an ellipse bewteen the minimum and maximum value of inclination N times. Default=360")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--no-save-output', action="store_true", help="Do not save data output")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                           help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+
 
 
     ### 'plot' command
@@ -748,7 +784,7 @@ def showGaiaContent(args) -> None:
     # Get table format to display the content
     table_format = args.table_format
     # Create a random 'objectInfo' object just to fill
-    object_example = objectInfo(name='', RA=280, DEC=-60, identifiedAs="Other")
+    object_example = objectInfo(name='', RA=280, DEC=-60, pmra=0.0, pmdec=0.0, identifiedAs="Other")
     # Get an example data
     data = get_data_via_astroquery(args, object_example, 'cone', 'content')
     # Get the data into a table format
@@ -1179,6 +1215,8 @@ class objectInfo:
     name: str
     RA: float
     DEC: float
+    pmra: float
+    pmdec: float
     identifiedAs: str
 
     def __post_init__(self):
@@ -1210,10 +1248,12 @@ def get_RA_and_DEC(args):
     # If the object was found online, use those coords. Otherwise search for coords using astropy and, lastly, the ones provided by the user
     if not object_online_found:
         RA, DEC = decide_coords(args)
+        pmra, pmdec = 0.0, 0.0 # If the object was not found, fill the proper motion with some values
         identified = "Other"
     else: # if object_online_found
         RA, DEC = object_online_data.ra, object_online_data.dec
-    object_info = objectInfo(name=args.name, RA=RA, DEC=DEC, identifiedAs=identified)
+        pmra, pmdec = object_online_data.pmra, object_online_data.pmdec
+    object_info = objectInfo(name=args.name, RA=RA, DEC=DEC, pmra=pmra, pmdec= pmdec, identifiedAs=identified)
 
     return object_info
 
@@ -1226,18 +1266,6 @@ def print_data_requested(data, start_time, show_n_rows=13):
     data.pprint(max_lines=show_n_rows)
     print()
     print_elapsed_time(start_time, "requesting data")
-
-
-def replace_last_ocurrence_word(text, word_to_replace, replacement_word):
-    """
-    Replaces the last ocurrence of a word in a string. So, if I want to replace the word 'pizza' with 'pasta'
-    the phrase 'pizza, I like pizza' becomes 'pizza, I like pasta'
-    """
-    # Find the last occurrence of the word
-    last_occurrence_index = text.rfind(word_to_replace)
-    # Replace the last occurrence
-    new_text = text[:last_occurrence_index] + replacement_word + text[last_occurrence_index + len(word_to_replace):]
-    return new_text
 
 
 def check_if_save_file_exists():
@@ -1327,15 +1355,21 @@ def where_to_save_data_if_found_in_Archive(args, command, mode, p, object_info)-
         else:
             current_path = Path.cwd()
         object_path_to_save = get_Object_directory(args, current_path, object_info.name, object_info.identifiedAs)
-        filename = f"{object_info.name.replace(' ', '_').lower()}_{command}_{mode}.{args.outfile_extension}"
+        filename = f"{object_info.name.replace(' ', '_').lower()}_{command}_{mode}.dat"
         filename = f"{object_path_to_save}/{filename}"
         p.status(f"{colors['YELLOW']}No outfile name provided in input. {colors['GREEN']}Data will be saved as\n'{colors['L_BLUE']}{filename}{colors['GREEN']}'\ninto working directory ('{shortened_path(str(current_path))}'){colors['NC']}{colors['NC']}")
         return filename
     if args.outfile:
-        if args.outfile.endswith(args.outfile_extension):
-            filename = f"{replace_last_ocurrence_word(args.outfile, f'.{args.outfile_extension}', '')}_{command}_{mode}.{args.outfile_extension}"
+        possible_extensions = ['.dat', '.csv', '.txt']
+        endsWithValidFileExtension = False
+        for fileExtension in possible_extensions:
+            if args.outfile.endswith(fileExtension):
+                endsWithValidFileExtension = True
+                break
+        if endsWithValidFileExtension:
+            filename = str(args.outfile)
         else:
-            filename = f"{args.outfile}_{command}_{mode}.{args.outfile_extension}"
+            filename = f"{args.outfile}.dat"
         # Convert to a Path object
         path = Path(filename)
         current_path = Path.cwd()
@@ -1348,7 +1382,7 @@ def where_to_save_data_if_found_in_Archive(args, command, mode, p, object_info)-
 
 def ask_to(ask_text: str, max_attempts=10)->bool | None:
     """
-    Asks the user if wants to replace the current file using Regex
+    Asks the user with a prompt and receives a 'Yes/No' reply. Yes = True, No = False
     """
     # Regular expression patterns
     yes_pattern = re.compile(r"^(y|ye|yes)$", re.IGNORECASE)
@@ -1374,7 +1408,7 @@ def ask_to(ask_text: str, max_attempts=10)->bool | None:
         sys.exit(1)
 
 
-def print_before_and_after_filter_length(original_length: int, filtered_length: int, n_prints=40)->None:
+def print_before_and_after_filter_length(original_length: int, filtered_length: int, n_prints=50)->None:
     pick_color = randomColor()
     random_char = randomChar()
     separator = f"{pick_color}{random_char*n_prints}{colors['NC']}"
@@ -1382,13 +1416,13 @@ def print_before_and_after_filter_length(original_length: int, filtered_length: 
     print(separator)
     print(f"  -> Original data length: {colors['PURPLE']}{original_length}{colors['NC']}")
     print(f"  -> Filtered data length: {colors['BLUE']}{filtered_length}{colors['NC']}")
-    print(f"     \"Survival\" data:      {colors['BLUE']}{((filtered_length/original_length)*100):.2f}%{colors['NC']}")
+    print(f"  -> \"Survival\" data:      {colors['BLUE']}{((filtered_length/original_length)*100):.2f}%{colors['NC']}")
     print(separator)
     print()
-    return
+    return None
 
 
-def get_filename_in_list(word_to_split_in_a_list, char_to_split: str = '_'):
+def get_filename_in_list(word_to_split_in_a_list: str, char_to_split: str = '_'):
     """
     Searches for the words 'raw' or 'filtered' that should be separated by '_' characters in filename.
     For example, "my_example_raw" when separated/splitted by '_' chars, raw will be in position 2.
@@ -1438,7 +1472,7 @@ def decide_parameters_to_save_data(args, object_info: objectInfo | None):
         # Get the object name 
         obj_name = get_filename_in_list(filename_original_without_extension)
         # Based on where is saved the file provided, get if it is a Glob Cluster, Open Cluster, or Other
-        new_object = objectInfo(name=obj_name, RA=0, DEC=0., identifiedAs=decide_identifiedAs_based_on_abs_path(file_Path_object))
+        new_object = objectInfo(name=obj_name, RA=0., DEC=0., pmra=0.0, pmdec=0.0, identifiedAs=decide_identifiedAs_based_on_abs_path(file_Path_object))
         return new_object
     else:
         return object_info
@@ -1465,6 +1499,442 @@ def save_data_output(args, command, mode, object_info, data):
                 return
     data.write(filename, format=args.data_outfile_format, overwrite=True)
     p.success(f"{colors['GREEN']}Data saved{colors['NC']}")
+
+
+@dataclass(kw_only=True)
+class ellipseVPDCenter():
+    pmra: float
+    pmdec: float
+
+
+def get_pmra_pmdec_for_VPD(args, obj_name)->ellipseVPDCenter:
+    """
+    Gets the pmra and pmdec components depending if the user has provided or not them explicitly as flags.
+    If they have not been explicitly been given as flags, the program will try to get them depending if they
+    are identified as Globular Cluser or Open Cluster. If the objects is a "Custom" object, then the parameters
+    pmra and pmdec must be explicitly be given by the user. Otherwise quits the program
+    """
+    if args.pmra is None or args.pmdec is None:   
+        print(f"{sb} {colors['PURPLE']}No PMRA and/or PMDEC provided. Attempting to get these parameters based on object name in Archive...{colors['NC']}")
+        # Manually add the object_name found to 'args' variable
+        setattr(args, 'name', obj_name)
+        setattr(args, 'skip_extra_data', False)
+        # Get coordiantes of the object in degrees
+        object_info =  get_RA_and_DEC(args)
+        # If the object is not found then it will return the "default" values. Check if those values match
+        # If they do, it means that the user has not provided arguments for '--pmra' or '--pmdec'
+        # and the user will have to explicitly provide them since the program could not get them automatically
+        if object_info.pmra == 0.0 and object_info.pmdec == 0.0 and object_info.identifiedAs == "Other":
+            print(f"{warning} {colors['RED']}Since you do not explicitly provided PMRA ('--pmra') and PMDEC ('--pmdec') parameters,\n    the program tried to automatically find them.{colors['NC']}")
+            print(f"{colors['RED']}    However, the program could not find any parameters for your object '{obj_name}' in Archive.{colors['NC']}")
+            print(f"{colors['RED']}    You will have to re-run the program providing '--pmra' and '--pmdec' parameters.{colors['NC']}")
+            sys.exit(1)
+        if object_info.identifiedAs.lower == "GlobularCluster":
+            print(f"{sb} {colors['BLUE']} Object found in Archives. Using values from: {colors['PURPLE']}Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
+        if object_info.identifiedAs == "OpenCluster":
+            print(f"{sb} {colors['BLUE']} Object found in Archives. Using values from: {colors['PURPLE']}Cantat-Gaudin et al. (2020, A&A, 640, A1){colors['NC']}")
+        print(f"    {sb_v2} pmra:  {colors['CYAN']}{object_info.pmra} (mas/yr){colors['NC']}")
+        print(f"    {sb_v2} pmdec: {colors['CYAN']}{object_info.pmdec} (mas/yr){colors['NC']}")
+        pmra, pmdec = object_info.pmra, object_info.pmdec
+    else:
+        print(f"    {sb_v2} pmra:  {colors['CYAN']}{args.pmra} (mas/yr){colors['NC']}")
+        print(f"    {sb_v2} pmdec: {colors['CYAN']}{args.pmdec} (mas/yr){colors['NC']}")
+        pmra, pmdec = args.pmra, args.pmdec
+    ellipseCenter = ellipseVPDCenter(pmra=pmra, pmdec=pmdec)
+    return ellipseCenter
+
+
+def check_width_and_height_provided_for_ellipse(args, max_allowed: int =2)->None:
+    """
+    Checks if arguments provided for "width" and "height" for the ellipse
+    are exactly equal to 2. If not, tell the user this problem and an example of how to use this.
+    Also checks if the user has provided exactly 2 arguments for each parameter, and sorts them;
+    so the first item is the minimum and the second is the maximum
+    """
+    if len(args.width) != max_allowed:
+        print(f"{warning} {colors['RED']}You have provided an invalid number of parameters for ellipse width ('--width').{colors['NC']}")
+        print(f"{colors['RED']}    Maximum allowed number of parameters are {max_allowed}. However, you have provided {len(args.width)} params{colors['NC']}")
+        print(f"{colors['PURPLE']}    Example usage: --width 5.5 10.5{colors['NC']}")
+        sys.exit(1)
+    if len(args.height) != max_allowed:
+        print(f"{warning} {colors['RED']}You have provided an invalid number of parameters for ellipse heigth ('--heigth').{colors['NC']}")
+        print(f"{colors['RED']}    Maximum allowed number of parameters are {max_allowed}. However, you have provided {len(args.width)} params{colors['NC']}")
+        print(f"{colors['PURPLE']}    Example usage: --heigth 5.5 10.5{colors['NC']}")
+        sys.exit(1)
+    if len(args.inclination) != max_allowed:
+        print(f"{warning} {colors['RED']}You have provided an invalid number of parameters for ellipse inclination ('--inclination').{colors['NC']}")
+        print(f"{colors['RED']}    Maximum allowed number of parameters are {max_allowed}. However, you have provided {len(args.width)} params{colors['NC']}")
+        print(f"{colors['PURPLE']}    Example usage: --inclination -89.9 89.9{colors['NC']}")
+        sys.exit(1)
+    # Also check that the parameters are positive numbers
+    # or inclination is a valid number, between -90 and 90
+    for width in args.width:
+        if width <= 0:
+            print(f"{warning} {colors['RED']}Widths provided must be positive{colors['NC']}")
+            print(f"{colors['RED']}    Invalid value: {width}{colors['NC']}")
+            sys.exit(1)
+    for height in args.height:
+        if height <= 0:
+            print(f"{warning} {colors['RED']}Heights provided must be positive{colors['NC']}")
+            print(f"{colors['RED']}    Invalid value: {height}{colors['NC']}")
+            sys.exit(1)
+    for inclination in args.inclination:
+        if not (-90.0 <= inclination <= 90.0):
+            print(f"{warning} {colors['RED']}Inlination must have a value between -90.0 and +90 (degrees){colors['NC']}")
+            print(f"{colors['RED']}    Invalid value: {inclination}{colors['NC']}")
+            sys.exit(1)
+    # Finally, order the lists
+    args.width.sort()
+    args.height.sort()
+    args.inclination.sort()
+    return None
+
+
+@dataclass(order=True, kw_only=True)
+class EllipseClass():
+    """
+    A class parameters of an ellipse (adapted to purposes of this code)
+    """
+    center_x: float # x-axis center coordinate
+    center_y: float # y-axis center coordinate
+    width: float # in mas / yr
+    height: float # in mas / yr
+    inclination: float # angle inclination in degrees
+
+
+@dataclass(frozen=True, order=True, kw_only=True)
+class IteratorClass():
+    """
+    A class used to change iterators cycles/parameters
+    """
+    minimum: float
+    maximum: float
+    n_step: int
+
+
+def create_IteratorClass_objects_for_ellipse(args):
+    # Get the values for ellipse width
+    width_min, width_max, width_nsteps = np.min(args.width), np.max(args.width), args.n_divisions_in_width
+    width_it = IteratorClass(minimum=width_min, maximum=width_max, n_step=width_nsteps) 
+    # Get the values for ellipse height
+    height_min, height_max, height_nsteps = np.min(args.height), np.max(args.height), args.n_divisions_in_height
+    height_it = IteratorClass(minimum=height_min, maximum=height_max, n_step=height_nsteps)
+    # Get angle inclination for ellipse
+    incl_min, incl_max, incl_nsteps = np.min(args.inclination), np.max(args.inclination), args.n_divisions_in_inclination
+    incl_it = IteratorClass(minimum=incl_min, maximum=incl_max, n_step=incl_nsteps)
+    return width_it, height_it, incl_it
+
+
+def check_if_max_value(value: int, current_max: int):
+    """
+    Simple function that checks if a value is bigger than a current one.
+    If the value is greater than the current maximum, it returns the value.
+    Otherwise it returns the maximum.
+    """
+    if value > current_max:
+        return value, True
+    return current_max, False
+
+
+def DefineEllipse(x: np.ndarray, y: np.ndarray, x_center: float, y_center: float, 
+                  ell_width: float, ell_height: float, angle_inclination: float) -> np.ndarray:
+    """
+    Create an ellipse with center given with coordinates (x_center, y_center).
+    Also, a width and height (x and y-axis, respectively) must be passed, given
+    an 'incilnation' angle.
+    """
+    
+    cos_angle = np.cos(np.radians(180.-angle_inclination))
+    sin_angle = np.sin(np.radians(180.-angle_inclination))
+
+    xc = x - x_center
+    yc = y - y_center
+
+    xct = xc * cos_angle - yc * sin_angle
+    yct = xc * sin_angle + yc * cos_angle 
+
+    rad_cc = (xct**2/(ell_width/2.)**2) + (yct**2/(ell_height/2.)**2)
+    return rad_cc
+
+
+def loop_Montecarlo(x: np.ndarray, y: np.ndarray,
+                    w_array: np.ndarray, h_array: np.ndarray, a_array: np.ndarray,
+                    pmra_center:float, pmdec_center:float, p) -> EllipseClass:
+    max_in_stars = 0
+    total_length = len(w_array)*len(h_array)
+    p.status(f"{colors['GREEN']}Creating different ellipses and counting objects inside them ({colors['PURPLE']}{print_percentage(total_length, 0.0)}{colors['GREEN']}){colors['NC']}")
+    ellipse_parameters = EllipseClass(center_x=0., center_y=0, width=0., height=0., inclination=0.)
+    counter_progress = 0
+    with tqdm(total=total_length, desc=f"{sb} {colors['BLUE']}Playing with ellipses{colors['NC']}", leave=False) as pbar:
+        for w_it in w_array:
+            for h_it in h_array:
+                for angle_it in a_array:
+                    if w_it == h_it:
+                        continue # due to tidal forces, object in VPD will have an elliptic form
+                                 # also, applying an inclination to a circle is not very useful...
+                    counter_in, counter_out = 0, 0
+                    ellipse_zone = DefineEllipse(x, y, pmra_center, pmdec_center, w_it, h_it, angle_it)
+                    for r in ellipse_zone:
+                        if r <= 1:
+                            counter_in += 1
+                        if r > 1:
+                            counter_out += 1
+                    max_in_stars, new_max_found = check_if_max_value(counter_in, max_in_stars)
+                    if new_max_found:
+                        ellipse_parameters = EllipseClass(center_x=pmra_center, center_y=pmdec_center, width=w_it,
+                                                         height=h_it, inclination=angle_it)
+                counter_progress+=1
+                p.status(f"{colors['GREEN']}Creating different ellipses and counting objects inside them ({colors['PURPLE']}{print_percentage(total_length, counter_progress)}{colors['GREEN']}){colors['NC']}")
+                pbar.update(1)
+    p.success(f"{colors['PURPLE']}Optimal ellipse extracted{colors['NC']}")
+    return ellipse_parameters
+
+
+def count_stars_inside_ellipse(pmra_center: float , pmdec_center: float, original_data: Table, 
+                            width_iterator, height_iterator, angle_iterator, p
+                            ) -> EllipseClass:
+    """
+    A simple function that count stars inside an ellipse. It will return an Ellipse
+    object with parameters that maximizes the numbers of stars/objects within an
+    ellipse in a Vector Point Diagram; where the ellipse center will be given by
+    parameters given in Vasiliev & Baumgardt (2021) or Cantat-Gaudin (2020) files 
+    (if available).
+    """
+    # Create a copy of the arrays containing positions (x,y) in VPD
+    x, y = np.asarray(original_data['pmra']), np.asarray(original_data['pmdec'])
+        
+    width_range = np.linspace(width_iterator.minimum, width_iterator.maximum, width_iterator.n_step)
+    height_range = np.linspace(height_iterator.minimum, height_iterator.maximum, height_iterator.n_step)
+    angle_range = np.linspace(angle_iterator.minimum, angle_iterator.maximum, angle_iterator.n_step)
+
+    optimal_ellipse = loop_Montecarlo(x, y, width_range, height_range,
+                                     angle_range, pmra_center, pmdec_center, p)
+    return optimal_ellipse
+
+
+def print_found_ellipse_attributes(ellipse: EllipseClass, ntimes=50)->None:
+    nc = colors['NC']
+    c1= randomColor()
+    c2= randomColor()
+    c3 = randomColor()
+    print()
+    print(f"{c3}{'='*ntimes}{nc}")
+    print(f"    {c1}\"Optimized\" ellipse parameters:{nc}")
+    print(f"    {c2}-> {c1}Center coordinates in VPD: ({ellipse.center_x:.2f}, {ellipse.center_y:.2f}){nc}")
+    print(f"    {c2}-> {c1}Width: {ellipse.width:.2f} mas / yr{nc}")
+    print(f"    {c2}-> {c1}Height: {ellipse.height:.2f} mas / yr{nc}")
+    print(f"    {c2}-> {c1}Angle inclination: {ellipse.inclination:.2f} deg{nc}")
+    print(f"{c3}{'='*ntimes}{nc}")
+    print()
+    return 
+
+
+def check_if_data_lies_inside_ellipse(original_data: Table, ell: EllipseClass):
+    """
+    Given a data with parameters/coordinates (x,y), if the data is inside the ellipse 
+    (ell) we keep it. Else, it is discarded. This function returns a boolean list 
+    that will be used to mask data and a list with colors to plot.
+    """
+    x, y = np.asarray(original_data['pmra']), np.asarray(original_data['pmdec'])
+    rad_cc = DefineEllipse(x, y, ell.center_x, ell.center_y, ell.width, 
+                           ell.height, ell.inclination)
+
+    mask_array, color_array = [], []
+    for r in rad_cc:
+        if r <= 1:
+            mask_array.append(True)
+            color_array.append('green') # Color to plot points inside ellipse
+        if r > 1:
+            mask_array.append(False)
+            color_array.append('cyan') # Color to plot points outside ellipse
+    
+    if (len(x) != len(mask_array)) or (len(y) != len(mask_array)):
+        print(f"{warning}{colors['RED']}Ellipse mask length does not math the original data length{colors['NC']}")
+        sys.exit(1)
+    mask_array = np.asarray(mask_array)
+    return mask_array, color_array
+
+
+def filter_data_by_mask(original_data: Table, mask_list):
+    """
+    Applies a mask to a Gaia Table
+    """
+    # Create a copy, so we avoid to touch the original data by error
+    copy_original_data = copy.deepcopy(original_data)
+    # Filter data
+    filtered_data = copy_original_data[mask_list]
+    return filtered_data
+    
+
+def plot_ellipse_in_VPD(args, obj_name: str, original_data: Table, ellipse: EllipseClass,
+                        pmra_center: float, pmdec_center: float, colors_array):
+    # Set the limits to plot
+    x_limit = [pmra_center-5, pmra_center+5]
+    y_limit = [pmdec_center-5, pmdec_center+5]
+    # Create the plot
+    fig, ax = plt.subplots(1)
+    ax.set_aspect('equal')
+    label_fontsize = 35
+    ax.set_xlim(x_limit[0], x_limit[1])
+    ax.set_ylim(y_limit[0], y_limit[1])
+    plt.rcParams["figure.figsize"] = (28,21)
+    matplotlib.rc('xtick', labelsize=32) 
+    matplotlib.rc('ytick', labelsize=32)
+    label_fontsize = 35
+    ax.set_xlim(x_limit[0], x_limit[1])
+    ax.set_ylim(y_limit[0], y_limit[1])
+    plt.rcParams["figure.figsize"] = (28,21)
+    matplotlib.rc('xtick', labelsize=32) 
+    matplotlib.rc('ytick', labelsize=32)
+    plt.rcParams["figure.figsize"] = (28,21)
+    ellipse_center = (ellipse.center_x, ellipse.center_y)
+    g_ellipse = patches.Ellipse(ellipse_center, ellipse.width, ellipse.height, 
+                                angle=ellipse.inclination, fill=False, 
+                                edgecolor='green', linewidth=0.3)
+    ax.add_patch(g_ellipse)
+    ax.scatter(original_data['pmra'], original_data['pmdec'], c=colors_array, linewidths=0.3, s=1.)
+    ax.plot(pmra_center, pmdec_center, 'ro', markersize = 5, 
+            label = 'Reference')
+    anchored_text = AnchoredText(r'$r_{\mu_\alpha}$ = '+str(round(ellipse.width,2))+'\n'
+                                 +r'$r_{\mu_\delta}$ = '+str(round(ellipse.height,2))+'\n'
+                                 +r'$\theta $ ='+str(round(ellipse.inclination,2))
+                                 +r'$^{\circ}$'
+                                 +'\nC = ('+str(round(pmra_center,2))+', ' +str(round(pmdec_center,2))+')', 
+                                 loc='lower left', frameon=False,
+                                 prop=dict(size=38))
+    ax.add_artist(anchored_text)
+    ax.grid(color='gray', linestyle='--', alpha=0.5, linewidth=2)
+    ax.set(xlabel=r'$\mu_{\alpha} \ \cos \delta$ ($mas \cdot yr^{-1}$)', 
+           ylabel="$\mu_{\delta}$ ($mas \cdot yr^{-1}$)")
+    ax.xaxis.label.set_size(label_fontsize)
+    ax.yaxis.label.set_size(label_fontsize)
+    ax.tick_params(which='both', width=4.5, top='on')
+    ticksize = 14
+    ax.tick_params(which='major',length=ticksize, direction = 'in')
+    ax.tick_params(which='minor',length=ticksize/2., direction = 'in')
+    ax.yaxis.set_ticks_position('both')
+    plt.minorticks_on()
+    plt.title(obj_name.upper(), fontsize=35)
+    plt.show()
+    plt.close()
+
+
+def set_new_values_for_ellipse_parameters(args, var_name: str, max_attempts=10):
+    """
+    If the user is not happy with the result, he/she can run the program again providing new parameters for
+    width, height and inclination recycling some variables previousle used; so it is no necessary to fully
+    re-run the program
+    """
+    ask_text = f"{sb} {colors['GREEN']} Do you want to Keep values or Change values for '{colors['RED']}{var_name}{colors['GREEN']}'?{colors['NC']}"
+    ask_text = f"{ask_text}\n    {colors['CYAN']}(C)hange value/(K)eep value: {colors['NC']}"
+    # Regular expression patterns
+    change_pattern = re.compile(r"^(c|ch|cha|chan|chang|change)$", re.IGNORECASE)
+    keep_pattern = re.compile(r"^(k|ke|kee|keep)$", re.IGNORECASE)
+    # Initalize attempts
+    attempts = 0
+
+    while attempts < max_attempts:
+        response = input(ask_text)
+    
+        if change_pattern.match(response):
+            wantToChange = True
+            break
+        elif keep_pattern.match(response):
+            wantToChange = False
+            break
+        else:
+            print(f"{warning} {colors['YELLOW']}Invalid option. Please enter '[{colors['L_RED']}C{colors['YELLOW']}]hange' or '[{colors['L_RED']}K{colors['YELLOW']}]eep'{colors['NC']}")
+            print(f"    Remaining attempts: {max_attempts - attempts}")
+            attempts += 1
+        if attempts > max_attempts:
+            print(f"{warning} {colors['L_RED']}You have reached the maximum number of attempts. Exiting...{colors['NC']}")
+            sys.exit(1)
+    if wantToChange:
+        # Ask for minimum and maximum values
+        if var_name == 'width':
+            old_value_1 = args.width[0]
+            old_value_2 = args.width[1]
+            n_step_value = args.n_divisions_in_width
+            n_step_label = 'n_divisions_in_width'
+        elif var_name == 'height':
+            old_value_1 = args.height[0]
+            old_value_2 = args.height[1]
+            n_step_value = args.n_divisions_in_height
+            n_step_label = 'n_divisions_in_height'
+        elif var_name == 'inclination':
+            old_value_1 = args.inclination[0]
+            old_value_2 = args.inclination[1]
+            n_step_value = args.n_divisions_in_inclination
+            n_step_label = 'n_divisions_in_inclination'
+        updated_value1 = float(input(f"    -> First new value for '{var_name}' parameter (old value '{old_value_1}'): "))
+        updated_value2 = float(input(f"    -> Second new value for '{var_name}' parameter (old value '{old_value_2}'): "))
+        value_list = [updated_value1, updated_value2]
+        value_list.sort()
+        # Ask for n step updated
+        updated_n_step= int(input(f"    -> New value for N steps parameter (old value '{n_step_value}'): "))
+        # Update the values
+        setattr(args, var_name, value_list)
+        setattr(args, n_step_label, updated_n_step)
+        print(f"{sb} {colors['GREEN']}Updated values for '{colors['PURPLE']}{var_name}{colors['GREEN']}' parameter")
+    else:
+        return
+
+
+def extractEllipseData(args, subcommand, subsubcommand):
+    # Check if the user has provided the correct number of parameters for width and height, which must be 2
+    # Also sort the lists so, for example, the first item of args.width is the minimum and the second is
+    # the maximum value
+    check_width_and_height_provided_for_ellipse(args)
+    # Get the original data from file. Since the file is required 'object_info' (the second variable returned) will always be "None" variable
+    original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
+    # Get the name of the object name based on the filename provided
+    file_Path_object = Path(args.file)
+    # Get only the filename. Without its path and without its file extension
+    filename_original_without_extension = str(file_Path_object.stem)
+    # Get the object name from filename
+    obj_name = get_filename_in_list(filename_original_without_extension)
+    # Get the coordinates for ellipse center
+    centerEllipse = get_pmra_pmdec_for_VPD(args, obj_name)
+    while True:
+        width_it, height_it, incl_it = create_IteratorClass_objects_for_ellipse(args)
+        # Create a simple process to track the results
+        p = log.progress("Ellipse")
+        # Get the "optimal ellipse", which maximizes the number of objects inside it
+        ellipse = count_stars_inside_ellipse(centerEllipse.pmra, centerEllipse.pmdec, original_data, 
+                                             width_it, height_it, incl_it, p)
+        # Print some parameters related to this 'optimal' ellipse
+        print_found_ellipse_attributes(ellipse)
+        ellipse_mask, colors_array = check_if_data_lies_inside_ellipse(original_data, ellipse)
+        filtered_data = filter_data_by_mask(original_data, ellipse_mask)
+        print_before_and_after_filter_length(len(original_data), len(filtered_data))
+        try:
+            plot_ellipse_in_VPD(args, obj_name, original_data, ellipse, centerEllipse.pmra, 
+                                centerEllipse.pmdec, colors_array)
+        except:
+            print(f"{warning} {colors['RED']}Something happened when trying to plot VPD and ellipse. Continuing without plotting...{colors['NC']}")
+            break
+        isUserHappy = ask_to(f"{colors['GREEN']}{sb} Are you happy with this result? {colors['RED']}[Y]es/[N]o{colors['GREEN']}: {colors['NC']}")
+        if isUserHappy:
+            break
+        else:
+            wantToContinue = ask_to(f"{colors['RED']}{sb} Do you want to continue with the program? {colors['PURPLE']}[Y]es/[N]o{colors['RED']}: {colors['NC']}")
+            if not wantToContinue:
+                print(f"\n{colors['L_CYAN']}Bye!{colors['NC']}")
+                sys.exit(0)
+            else:
+                set_new_values_for_ellipse_parameters(args, 'width')
+                set_new_values_for_ellipse_parameters(args, 'height')
+                set_new_values_for_ellipse_parameters(args, 'inclination')
+    p = log.progress(f"{colors['PINK']}Saving data{colors['NC']}")
+    # If the user provided a file, try to obtain the "identifiedAs" parameter based on its path
+    object_info_identified = decide_parameters_to_save_data(args, object_info)
+    # Save data if needed
+    if not args.no_save_output:
+        save_data_output(args, subcommand, subsubcommand, object_info_identified, filtered_data)
+        p.success(f"{colors['GREEN']}Data succesfully saved{colors['NC']}")
+    else:
+        p.failure(f"{colors['RED']}Data has not been saved{colors['NC']}")
+    return filtered_data
 
 
 def filter_data_with_parameter(data, parameter, p, min_value=None, max_value=None):
@@ -1570,6 +2040,7 @@ def check_if_read_file_exists(filename)->None:
     return
 
 
+
 def extractFilterParameters(args, subcommand: str, subsubcommand: str):
     original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
     original_length = len(original_data)
@@ -1579,7 +2050,6 @@ def extractFilterParameters(args, subcommand: str, subsubcommand: str):
     object_info_identified = decide_parameters_to_save_data(args, object_info)
     # Save data if needed
     if not args.no_save_output:
-        print(f"{warning} {colors['RED']}Not saving data output (--no-save-output){colors['NC']}")
         save_data_output(args, subcommand, subsubcommand, object_info_identified, filtered_data)
         p.success(f"{colors['GREEN']}Data succesfully saved{colors['NC']}")
     else:
@@ -1640,6 +2110,12 @@ def extractCommand(args)->None:
         if args.subsubcommand == "parameters":
             filtered_data = extractFilterParameters(args, 'filter', 'parameters')
             sys.exit(0)
+        if args.subsubcommand == "ellipse":
+            filtered_data = extractEllipseData(args, 'filter', 'ellipse')
+            sys.exit(0)
+
+
+ 
 
 
 
@@ -1677,7 +2153,6 @@ def main() -> None:
     if args.command == 'extract':
         # Extract data using Astroquery
         extractCommand(args)
-
 
     if args.command == 'plot':
         # Check that user has provided a valid format-name
