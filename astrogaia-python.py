@@ -22,7 +22,7 @@ import re
 from typing import List
 import time
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import requests
 from pathlib import Path
 import signal
@@ -291,21 +291,52 @@ def parseArgs():
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('-i', '--inclination', type=float, nargs='+', default=[-90.0, 90.0],
                                                                  help="Minimum and maximum angle inclination to create ellipses. Example: '--inclination -89. 89.'\n'Inclination' is the angle between the Y-axis and the width axis counterclockwise in VPD")
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('-d', '--file-format', type=str, default='ascii.ecsv',
-                                                           help="File format to read file containing data. Default: 'asci.ecsv'")
+                                                                 help="File format to read file containing data. Default: 'asci.ecsv'")
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('-o', '--outfile', type=str,
-                                                           help="Output filename to save data output.")
+                                                                 help="Output filename to save data output.")
+    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                                 help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--n-divisions-in-width', type=int, default=10,
-                                                           help="The program will create an ellipse bewteen the minimum and maximum value of width N times. Default=10")
+                                                                 help="The program will create an ellipse bewteen the minimum and maximum value of width N times. Default=10")
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--n-divisions-in-height', type=int, default=10,
-                                                           help="The program will create an ellipse bewteen the minimum and maximum value of height N times. Default=10")
+                                                                 help="The program will create an ellipse bewteen the minimum and maximum value of height N times. Default=10")
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--n-divisions-in-inclination', type=int, default=360,
-                                                           help="The program will create an ellipse bewteen the minimum and maximum value of inclination N times. Default=360")
+                                                                 help="The program will create an ellipse bewteen the minimum and maximum value of inclination N times. Default=360")
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--no-print-data-requested', action="store_true", help='Print requested data to Archive')
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
     extract_subcommand_filter_subsubcommand_ellipse.add_argument('--no-save-output', action="store_true", help="Do not save data output")
-    extract_subcommand_filter_subsubcommand_ellipse.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
-                                                           help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    
+    # Sub-subcommand: extract - filter - cordoni
+    str_extract_subcommand_filter_subsubcommand_cordoni = 'cordoni'
+    extract_subcommand_filter_subsubcommand_cordoni_example = f"example: {sys.argv[0]} extract filter cordoni -f ngc104_filter_ellipse.dat"
+    extract_subcommand_filter_subsubcommand_cordoni = parser_sub_filter.add_parser(str_extract_subcommand_filter_subsubcommand_cordoni,
+                                                                                  help=f"{colors['CYAN']}Apply Cordoni et al. (2018, ApJ, 869, 139C) filtering algorithm to data{colors['NC']}",
+                                                                                  description=f"{colors['CYAN']}Apply Cordoni et al. (2018, ApJ, 869, 139C) filtering algorithm to Gaia data{colors['NC']}",
+                                                                                  epilog=extract_subcommand_filter_subsubcommand_cordoni_example,
+                                                                                  formatter_class=argparse.RawTextHelpFormatter)
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('-f', '--file', type=str, required=True,
+                                                           help="File containing data to read, extract and filter.")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--n-divisions', type=int, default=20,
+                                                                 help="Number of bins to divide the data into. Default=20")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--n-iterations', type=int, default=3,
+                                                                 help="Number of times to apply Cordoni et al. algorithm. Default=3")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--sigma', type=float, default=3.0,
+                                                                 help='Number of times to multiply standard dev. to median value for every bin. Default=3.0')
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('-o', '--outfile', type=str,
+                                                                 help="Output filename to save data output.")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
+                                                                 help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--set-limits', action="store_true", 
+                                                                 help= "Apply custom upper and lower limits in magnitude for data.\nIf not provided (default), maximum and minimum mags will be used to create bins.")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-upper-limit', type=float,
+                                                                 help="Maximum magnitude to start creating bins")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-lower-limit', type=float,
+                                                                 help='Minimum magnitude to start creating bins')
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-want-to-print-bins', action='store_true',
+                                                                 help='Do not print details for bins created')
+
+
 
 
 
