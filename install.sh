@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to automatically install 'astrogaia-python.py' and its dependences
+# Script to automatically install 'astrogaia-python.py' and its dependences on Linux OS
 # Also, disables some features like automatically checking updates for some libraries
 
 
@@ -77,12 +77,15 @@ check_python_version() {
 instructions() {
   local env_name="$1"
   echo -e "\nFollow these steps to activate the environment for 'astrogaia-python':"
+  echo "# Enter into the directory where 'astrogaia-python' has been downloaded/cloned"
+  echo -e "i) Run 'cd astrogaia-python'"
   echo "# Activate the virtual environment"
-  echo -e "i) Run 'source ${env_name}/bin/activate'"
+  echo -e "ii) Run 'source ${env_name}/bin/activate'"
   echo "# Run the Python3 script"
-  echo -e "ii) Run 'astrogaia-python.py' script"
+  echo -e "iii) Run 'astrogaia-python.py' script"
   echo "# Disable the virtual environment"
-  echo -e "iii) Run 'deactivate'"
+  echo -e "iv) Run 'deactivate'"
+  
 }
 
 
@@ -140,6 +143,9 @@ main() {
 
   # Check if 'git' command is installed
   check_binary_presence "git" true
+
+  # Check if 'pip3' command is installed
+  check_binary_presence "pip3" true
 
   # Clone 'astrogaia-python' into the current repository
   echo "[+] Cloning 'astrogaia-python' repository..."
