@@ -28,7 +28,10 @@ from pathlib import Path
 import signal
 import copy
 import numpy as np
+from numpy import ones
+from numpy.linalg import lstsq
 from tqdm import tqdm
+import warnings
 
 
 # ANSI escape codes dictionary
@@ -323,20 +326,34 @@ def parseArgs():
                                                                  help="Number of times to apply Cordoni et al. algorithm. Default=3")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--sigma', type=float, default=3.0,
                                                                  help='Number of times to multiply standard dev. to median value for every bin. Default=3.0')
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('-d', '--file-format', type=str, default='ascii.ecsv',
+                                                                 help="File format to read file containing data. Default: 'asci.ecsv'")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('-o', '--outfile', type=str,
                                                                  help="Output filename to save data output.")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--data-outfile-format', type=str, default='ascii.ecsv',
                                                                  help="Data file format (not extension) to save data. Default: 'ascii.ecsv'\nFor more info, check: https://docs.astropy.org/en/stable/io/unified.html#built-in-table-readers-writers")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--set-mag-filter', type=str, default="g_rp",
+                                                                 help='Select the Gaia filter you want to use to divide data.\nOptions: {"g_rp", "g_bp", "g"}. Default="g_rp"')
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--set-limits', action="store_true", 
                                                                  help= "Apply custom upper and lower limits in magnitude for data.\nIf not provided (default), maximum and minimum mags will be used to create bins.")
-    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-upper-limit', type=float,
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-upper-limit', type=float, default=19.5,
                                                                  help="Maximum magnitude to start creating bins")
-    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-lower-limit', type=float,
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-lower-limit', type=float, default=10.5,
                                                                  help='Minimum magnitude to start creating bins')
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-want-to-print-bins', action='store_true',
                                                                  help='Do not print details for bins created')
-
-
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--pmra', type=float, default=0.0,
+                                                                 help="If provided, set explicitly Median PMRA value. Usually where the data is centered in VPD.")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--pmdec', type=float, default= 0.0,
+                                                                 help="If provided, set explicitly Median PMDEC value. Usually where the data is centered in VPD.")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-print-table-bins', action="store_true",
+                                                                 help="Do not print bins generated")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-as-gof-al', action="store_true",
+                                                                 help="Avoid filtering data by 'as_gof_al' parameter")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-mu-r', action="store_true",
+                                                                 help="Avoid filtering data by 'μ_R' parameter")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-parallax', action="store_true",
+                                                                 help="Avoid filtering data by 'parallax' parameter")
 
 
 
@@ -1259,7 +1276,7 @@ class objectInfo:
             raise ValueError(f"Invalid identifiedAs value. Allowed values are: {allowed_values}")
 
 
-def get_RA_and_DEC(args):
+def get_RA_and_DEC(args, fill=False):
     """
     Get coordinates of the object in degrees
     """
@@ -1278,9 +1295,14 @@ def get_RA_and_DEC(args):
             identified = "OpenCluster"
     # If the object was found online, use those coords. Otherwise search for coords using astropy and, lastly, the ones provided by the user
     if not object_online_found:
-        RA, DEC = decide_coords(args)
-        pmra, pmdec = 0.0, 0.0 # If the object was not found, fill the proper motion with some values
-        identified = "Other"
+        if not fill:
+            RA, DEC = decide_coords(args)
+            pmra, pmdec = 0.0, 0.0 # If the object was not found, fill the proper motion with some values
+            identified = "Other"
+        else: # fill the data with anything
+            RA, DEC = 0.0, 0.0
+            pmra, pmdec = 0.0, 0.0
+            identified = "Other"
     else: # if object_online_found
         RA, DEC = object_online_data.ra, object_online_data.dec
         pmra, pmdec = object_online_data.pmra, object_online_data.pmdec
@@ -1538,7 +1560,7 @@ class ellipseVPDCenter():
     pmdec: float
 
 
-def get_pmra_pmdec_for_VPD(args, obj_name)->ellipseVPDCenter:
+def get_pmra_pmdec_for_VPD(args, obj_name, original_data:Table | None = None, useMedian=False, fill=False)->(ellipseVPDCenter, str):
     """
     Gets the pmra and pmdec components depending if the user has provided or not them explicitly as flags.
     If they have not been explicitly been given as flags, the program will try to get them depending if they
@@ -1551,7 +1573,7 @@ def get_pmra_pmdec_for_VPD(args, obj_name)->ellipseVPDCenter:
         setattr(args, 'name', obj_name)
         setattr(args, 'skip_extra_data', False)
         # Get coordiantes of the object in degrees
-        object_info =  get_RA_and_DEC(args)
+        object_info =  get_RA_and_DEC(args, fill=fill)
         # If the object is not found then it will return the "default" values. Check if those values match
         # If they do, it means that the user has not provided arguments for '--pmra' or '--pmdec'
         # and the user will have to explicitly provide them since the program could not get them automatically
@@ -1567,12 +1589,20 @@ def get_pmra_pmdec_for_VPD(args, obj_name)->ellipseVPDCenter:
         print(f"    {sb_v2} pmra:  {colors['CYAN']}{object_info.pmra} (mas/yr){colors['NC']}")
         print(f"    {sb_v2} pmdec: {colors['CYAN']}{object_info.pmdec} (mas/yr){colors['NC']}")
         pmra, pmdec = object_info.pmra, object_info.pmdec
+        identified = object_info.identifiedAs
     else:
-        print(f"    {sb_v2} pmra:  {colors['CYAN']}{args.pmra} (mas/yr){colors['NC']}")
-        print(f"    {sb_v2} pmdec: {colors['CYAN']}{args.pmdec} (mas/yr){colors['NC']}")
-        pmra, pmdec = args.pmra, args.pmdec
+        if not useMedian:
+            print(f"    {sb_v2} pmra:  {colors['CYAN']}{args.pmra} (mas/yr){colors['NC']}")
+            print(f"    {sb_v2} pmdec: {colors['CYAN']}{args.pmdec} (mas/yr){colors['NC']}")
+            pmra, pmdec = args.pmra, args.pmdec
+        else:
+            print(f"{sb} {colors['BLUE']}Using median values obtained from data for 'pmra' and 'pmdec'{colors['NC']}")
+            pmra, pmdec = round(np.median(original_data['pmra']),3), round(np.median(original_data['pmdec']),3)
+            print(f"    {sb_v2} pmra:  {colors['CYAN']}{pmra} (mas/yr){colors['NC']}")
+            print(f"    {sb_v2} pmdec:  {colors['CYAN']}{pmdec} (mas/yr){colors['NC']}")
+        identified = "Other"
     ellipseCenter = ellipseVPDCenter(pmra=pmra, pmdec=pmdec)
-    return ellipseCenter
+    return ellipseCenter, identified
 
 
 def check_width_and_height_provided_for_ellipse(args, max_allowed: int =2)->None:
@@ -1911,63 +1941,6 @@ def set_new_values_for_ellipse_parameters(args, var_name: str, max_attempts=10):
         return
 
 
-def extractEllipseData(args, subcommand, subsubcommand):
-    # Check if the user has provided the correct number of parameters for width and height, which must be 2
-    # Also sort the lists so, for example, the first item of args.width is the minimum and the second is
-    # the maximum value
-    check_width_and_height_provided_for_ellipse(args)
-    # Get the original data from file. Since the file is required 'object_info' (the second variable returned) will always be "None" variable
-    original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
-    # Get the name of the object name based on the filename provided
-    file_Path_object = Path(args.file)
-    # Get only the filename. Without its path and without its file extension
-    filename_original_without_extension = str(file_Path_object.stem)
-    # Get the object name from filename
-    obj_name = get_filename_in_list(filename_original_without_extension)
-    # Get the coordinates for ellipse center
-    centerEllipse = get_pmra_pmdec_for_VPD(args, obj_name)
-    while True:
-        width_it, height_it, incl_it = create_IteratorClass_objects_for_ellipse(args)
-        # Create a simple process to track the results
-        p = log.progress("Ellipse")
-        # Get the "optimal ellipse", which maximizes the number of objects inside it
-        ellipse = count_stars_inside_ellipse(centerEllipse.pmra, centerEllipse.pmdec, original_data, 
-                                             width_it, height_it, incl_it, p)
-        # Print some parameters related to this 'optimal' ellipse
-        print_found_ellipse_attributes(ellipse)
-        ellipse_mask, colors_array = check_if_data_lies_inside_ellipse(original_data, ellipse)
-        filtered_data = filter_data_by_mask(original_data, ellipse_mask)
-        print_before_and_after_filter_length(len(original_data), len(filtered_data))
-        try:
-            plot_ellipse_in_VPD(args, obj_name, original_data, ellipse, centerEllipse.pmra, 
-                                centerEllipse.pmdec, colors_array)
-        except:
-            print(f"{warning} {colors['RED']}Something happened when trying to plot VPD and ellipse. Continuing without plotting...{colors['NC']}")
-            break
-        isUserHappy = ask_to(f"{colors['GREEN']}{sb} Are you happy with this result? {colors['RED']}[Y]es/[N]o{colors['GREEN']}: {colors['NC']}")
-        if isUserHappy:
-            break
-        else:
-            wantToContinue = ask_to(f"{colors['RED']}{sb} Do you want to continue with the program? {colors['PURPLE']}[Y]es/[N]o{colors['RED']}: {colors['NC']}")
-            if not wantToContinue:
-                print(f"\n{colors['L_CYAN']}Bye!{colors['NC']}")
-                sys.exit(0)
-            else:
-                set_new_values_for_ellipse_parameters(args, 'width')
-                set_new_values_for_ellipse_parameters(args, 'height')
-                set_new_values_for_ellipse_parameters(args, 'inclination')
-    p = log.progress(f"{colors['PINK']}Saving data{colors['NC']}")
-    # If the user provided a file, try to obtain the "identifiedAs" parameter based on its path
-    object_info_identified = decide_parameters_to_save_data(args, object_info)
-    # Save data if needed
-    if not args.no_save_output:
-        save_data_output(args, subcommand, subsubcommand, object_info_identified, filtered_data)
-        p.success(f"{colors['GREEN']}Data succesfully saved{colors['NC']}")
-    else:
-        p.failure(f"{colors['RED']}Data has not been saved{colors['NC']}")
-    return filtered_data
-
-
 def filter_data_with_parameter(data, parameter, p, min_value=None, max_value=None):
     # Filter by parameter between 2 values
     if min_value is not None and max_value is not None:
@@ -2071,6 +2044,753 @@ def check_if_read_file_exists(filename)->None:
     return
 
 
+# Start classes to create bins and store data into them
+@dataclass(kw_only=True)
+class euclidianPoint():
+    x: float
+    y: float
+    
+
+@dataclass(kw_only=True)
+class singlePoint():
+    ID: int
+    median_value: float
+    std_value: float
+    mag_median: float
+    mag_std : float
+    m: float = 0.
+    c: float = 0.
+    
+    
+@dataclass(kw_only=True)
+class pointsToInterpolate():
+    points: list[singlePoint] = field(default_factory=list)
+
+
+@dataclass
+class parameterList:
+    G_BP: list[float] = field(default_factory=list)
+    G_RP: list[float] = field(default_factory=list)
+    G: list[float] = field(default_factory=list)
+    as_gof_al: list[float] = field(default_factory=list)
+    parallax: list[float] = field(default_factory=list)
+    mu_R: list[float] = field(default_factory=list)
+        
+    
+@dataclass(kw_only=True)
+class Bin:
+    ID: int = 0
+    params: parameterList = field(default_factory=list)
+    minVal_mag: float 
+    maxVal_mag: float
+        
+    def __post_init__(self):
+        self.median_G_RP = np.median(self.params.G_RP)
+        self.median_G_BP = np.median(self.params.G_BP)
+        self.median_G = np.median(self.params.G)
+        self.median_as_gof_al = np.median(self.params.as_gof_al)
+        self.median_parallax = np.median(self.params.parallax)
+        self.median_mu_R = np.median(self.params.mu_R)
+        self.std_dev_G_RP = np.std(self.params.G_RP, ddof=1)
+        self.std_dev_G_BP = np.std(self.params.G_BP, ddof=1)
+        self.std_dev_G = np.std(self.params.G, ddof=1)
+        self.std_dev_as_gof_al = np.std(self.params.as_gof_al, ddof=1)
+        self.std_dev_parallax = np.std(self.params.parallax, ddof=1)
+        self.std_dev_mu_R = np.std(self.params.mu_R, ddof=1)
+        
+
+@dataclass(kw_only=True)
+class TotalBins:
+    bins: list[Bin] = field(default_factory=list)
+
+
+def get_important_parameters(args, original_data: Table, ellipse_center: ellipseVPDCenter)->parameterList:
+    """
+    Extract only important parameters that will be used later for Cordoni et al. (2018, 2020) algorithm
+    """
+    importantParameters = parameterList()
+    # Collect data parameters inside a list
+    for data_it in original_data:
+        importantParameters.G_RP.append(data_it["phot_rp_mean_mag"])
+        importantParameters.G_BP.append(data_it["phot_bp_mean_mag"])
+        importantParameters.G.append(data_it["phot_g_mean_mag"])
+        importantParameters.as_gof_al.append(data_it["astrometric_gof_al"])
+        importantParameters.parallax.append(data_it["parallax"])
+        importantParameters.mu_R.append(estimate_mu_sub_R(PM_alpha=data_it['pmra'],
+                                                          PM_delta=data_it['pmdec'],
+                                                          previous_PM_alpha_median=ellipse_center.pmra,
+                                                          previous_PM_delta_median=ellipse_center.pmdec))   
+    # Check if lists have the same size
+    list_of_lists = [importantParameters.G_BP, importantParameters.G_RP, importantParameters.G,
+                     importantParameters.as_gof_al, importantParameters.parallax,
+                     importantParameters.mu_R, original_data]
+    if all(len(list_of_lists[0]) == len(l) for l in list_of_lists[1:]):
+        pass
+    else:
+        print("Some of the parameters list does not have the same size as the other")
+        for index, lista in enumerate(list_of_lists):
+            print(f"list {index+1} with size {len(lista)}")
+            sys.exit(1)
+        
+    return importantParameters 
+     
+
+def which_parameter(parameters_in_list: parameterList,paramName: str):
+    """
+    Check which parameter will be used in the current process,
+    and if it is valid
+    """
+    if paramName == "astrometric_gof_al" or paramName == "as_gof_al":
+        return parameters_in_list.as_gof_al
+    if paramName == "phot_rp_mean_mag" or paramName == "G_RP":
+        return parameters_in_list.G_RP
+    if paramName == "phot_bp_mean_mag" or paramName == "G_BP":
+        return parameters_in_list.G_BP
+    if paramName == "phot_g_mean_mag" or paramName == "G":
+        return parameters_in_list.G
+    if paramName == "parallax":
+        return parameters_in_list.parallax
+    if paramName == "mu_R" or paramName == "muR":
+        return parameters_in_list.mu_R
+    sys.exit("No valid parameter was returned")
+
+
+def estimate_mu_sub_R(PM_alpha: float,
+                   PM_delta: float,
+                   previous_PM_alpha_median: float,
+                   previous_PM_delta_median: float
+                   ) -> float:
+    """
+    Estimates mu_R, which is basically the distance to the cluster center in the VPD space
+    """
+    return np.sqrt( np.power(PM_alpha - previous_PM_alpha_median, 2) + 
+                    np.power(PM_delta - previous_PM_delta_median, 2) )
+
+
+def check_min_and_max_values(minValue: float, maxValue: float, useCustomLimits: bool,
+                             lower_mag: float, upper_mag: float,
+                             default_lower_mag: float =10.5, default_upper_mag: float =19.5)->(float, float):
+    """
+    As suggested by Cordoni et al. (2018, 2020), values for Gaia magnitudes
+    should have an upper and lower limit. If the min/max value is
+    lower/bigger than these values, then simply "cut" min/max values
+    in those limits.
+    """
+    if useCustomLimits: # if the user wants to use custom values for upper and lower limits...
+        Cordoni_lower_mag = lower_mag
+        Cordoni_upper_mag = upper_mag
+        print(f"[+] Using Custom limits: [{Cordoni_lower_mag}, {Cordoni_upper_mag}]")
+        
+    if not useCustomLimits: # if not, check if they surpass acceptables values. 
+                            # If they do, replace them...
+         Cordoni_lower_mag = default_lower_mag
+         Cordoni_upper_mag = default_upper_mag
+    
+    if maxValue > Cordoni_lower_mag:
+        maxValue = Cordoni_upper_mag
+    if minValue < Cordoni_lower_mag:
+        minValue = Cordoni_lower_mag
+    
+    return minValue, maxValue
+
+
+def get_bin_size(args, values: list[float], numberOfDivisions: int) -> (float, float, float):
+    """
+    Obtains the maximum and minimum value of a list and returns the difference value
+    between each number that results dividing the max - min divided into N parts,
+    i.e., bin size. 
+    Returns the minimum, maximum and size of each bin after dividing this interval
+    into N parts.
+    """
+    assert (numberOfDivisions != 0), "You cannot divide by zero. You are attempting to create 0 bins."
+    assert (numberOfDivisions != 1),  "Dividing data into 1 bin just does not make sense..."
+    
+    maxValue: float = np.amax(values)
+    minValue: float = np.amin(values)
+    
+    minValue, maxValue = check_min_and_max_values(minValue, maxValue, args.set_limits, 
+                                                  args.mag_lower_limit, args.mag_upper_limit)
+    return maxValue, minValue, (maxValue - minValue)/ (1.0*numberOfDivisions)
+
+
+def get_mag_filter_name(filter_name: str) -> str | None:
+    mag_filter: str = filter_name.replace('_','').lower()
+    if mag_filter == 'grp':
+        return "G_RP"
+    elif mag_filter == 'gbp':
+        return "G_BP"
+    elif mag_filter == 'g':
+        return "G"
+    else:
+        print(f"{warning} {colors['RED']}You have provided an invalid Gaia filter: '{filter_name}'{colors['NC']}")
+        print(f"{colors['RED']}    Valid filters are: 'g_rp', 'g_bp' or 'g' (in capital letters are also valid).\n    Please retry{colors['NC']}")
+        sys.exit(1)
+
+
+def print_values_bins(maxValue: float, minValue: float, nBins: int,
+                      binValue: float, totalBins: TotalBins, mag_filter_name: str,
+                      print_more_details: bool = True) -> None:
+    """
+    A simple print statement to check values obtained from
+    getBinSize function.
+    """
+    # Pick a random color to print later
+    rand_number = random.randint(31,36) 
+    c = f'\033[1;{rand_number}m' # color
+    sh = f'\033[{rand_number}m' # shadow
+    nc = colors['NC'] # no color / reset color
+    filter_name = get_mag_filter_name(mag_filter_name)
+
+    if print_more_details:
+        print()
+        len_marker: int = 90
+        print(len_marker*"=")
+        text: str = "Estimated values are: "
+        for j in range(1, 5):
+            if j == 1:
+                print(f"{text}{j}) Max Value {filter_name} (mag): {maxValue:.3f} {colors['GRAY']}# Maximum value for G_RP magnitude{colors['NC']}")
+            if j != 1:
+                print(len(text)*" " + f"{j}) ", end='')
+                if j == 2:
+                    print(f"Min Value {filter_name} (mag): {minValue:.3f} {colors['GRAY']}# Minimum value for {filter_name} magnitude{colors['NC']}")
+                if j == 3:
+                    print(f"Number of req. Bins: {nBins} {colors['GRAY']}# Number of requested Bins{colors['NC']}")
+                if j == 4:
+                    print(f"Bin length {filter_name} (mag): {binValue:.3f} {colors['GRAY']}# Value of size/range for every bin{colors['NC']}")
+        print(len_marker*"=", end="\n")
+
+    # Create a table that will store data to print
+    table_data_list = []
+
+    for data in totalBins.bins:
+        if filter_name == "G_RP":
+            data_median_mag: float = data.params.G_RP
+            data_median_mag_stddev: float = data.std_dev_G_RP
+            len_data_mag = len(data.params.G_RP)
+        elif filter_name == "G_BP":
+            data_median_mag: float = data.median_G_BP
+            data_median_mag_stddev: float = data.std_dev_G_BP
+            len_data_mag = len(data.params.G_BP)
+        elif filter_name == "G":
+            data_median_mag: float = data.median_G
+            data_median_mag_stddev: float = data.std_dev_G
+            len_data_mag = len(data.params.G)
+        else:
+            print(f"{warning}{colors['RED']}Invalid filter name: {filter_name}. Exiting...{colors['NC']}")
+            sys.exit(1)
+        temp_list = []
+        temp_list.append(f"{sh}{data.ID}{nc}")
+        temp_list.append(f"{sh}[{data.minVal_mag:.2f}, {data.maxVal_mag:.2f}]{nc}")
+        temp_list.append(f"{sh}{len_data_mag}{nc}")
+        temp_list.append(f"{sh}{data_median_mag:.2f} ± {data_median_mag_stddev:.2f}{nc}")
+        temp_list.append(f"{sh}{data.median_as_gof_al:.2f} ± {data.std_dev_as_gof_al:.2f}{nc}")
+        temp_list.append(f"{sh}{data.median_mu_R:.2f} ± {data.std_dev_mu_R:.2f}{nc}")
+        temp_list.append(f"{sh}{data.median_parallax:.2f} ± {data.std_dev_parallax:.2f}{nc}")
+        table_data_list.append(temp_list)
+    print()
+
+    # Print the table with 'tabulate' library
+    headers_list = [f"{c}Bin{nc}", f"{c}Range {filter_name} (mag){nc}", f"{c}N{nc}", f"{c}<{filter_name}> (mag){nc}", 
+                     f"{c}<as_gof_al>{nc}", f"{c}<μ_R> (mas/yr){nc}", f"{c}<π> (mas){nc}"]
+    print(tabulate(table_data_list, headers=headers_list, tablefmt='grid'))
+    return None
+
+
+def check_if_total_bins_has_at_least_2_elems_or_more(totalBins: TotalBins, filter_name: str, nDivisions: int,
+                                                     minimum_per_bin: int = 2) -> bool:
+    """
+    Counts the number of elements inside every bin, which should be equal or bigger than 2
+    """
+    for index, bin_it in enumerate(totalBins.bins):
+        if filter_name == "G_RP":
+            params_data_median_mag: float = bin_it.params.G_RP
+        elif filter_name == "G_BP":
+            params_data_median_mag: float = bin_it.params.G_BP
+        elif filter_name == "G":
+            params_data_median_mag: float = bin_it.params.G
+        else:
+            print(f"{warning}{colors['RED']}Invalid filter name: {filter_name}. Exiting...{colors['NC']}")
+            sys.exit(1)
+        # Check the length of 2 parameters
+        if len(bin_it.params.as_gof_al) < minimum_per_bin:
+            print(f"{warning}{colors['RED']} Bin #{index+1} has {len(bin_it.median_as_gof_al)}{colors['NC']}")
+            print(f"    {colors['RED']}At least 2 elements are required per bin")
+            return False
+        if len(params_data_median_mag) < minimum_per_bin:
+            print(f"{warning}{colors['RED']} Bin #{index+1} has {len(params_data_median_mag)}{colors['NC']}")
+            print(f"    {colors['RED']}At least 2 elements are required per bin")
+            return False
+    return True
+
+
+def select_gaia_filter_key_param(filter_name: str)-> str | None:
+    if filter_name == 'G_RP':
+        return 'phot_rp_mean_mag'
+    elif filter_name == 'G_BP':
+        return 'phot_bp_mean_mag'
+    elif filter_name == 'G':
+        return 'phot_g_mean_mag'
+    else:
+        print(f"{warning}{colors['RED']}You have provided an invalid Gaia filter name ('{filter_name}'). Exiting...{colors['NC']}")
+        sys.exit(1)
+    
+
+def create_bins(args, astrodata: Table, nDivision: int, ellipse_center: ellipseVPDCenter, p, 
+               ) -> (TotalBins, float, float, float):
+    """
+    Data will be splitted into nDivision bins. This functions creates
+    those bins.
+    """
+    # Select magnitude column
+    mag_filter_name = get_mag_filter_name(args.set_mag_filter)
+    key_gaia_table = select_gaia_filter_key_param(mag_filter_name)
+    # Make a deepcopy, so if this data is modified the orginal data is not
+    mag_gaia_data = copy.deepcopy(astrodata[key_gaia_table])
+    # Estimate bin sizes
+    maxVal, minVal, binVal = get_bin_size(args, mag_gaia_data, nDivision)
+    totBins = TotalBins()
+    
+    # mu_R uses median for pmra and pmdec, so use them
+    previous_median_PM_RA = ellipse_center.pmra
+    previous_median_PM_DEC = ellipse_center.pmdec
+
+    # Filter warnings
+    # Since not always all the magnitudes will be measured for all the filters, this will throw a warning when
+    # when attempting to pass them as an array
+    #warnings.filterwarnings('ignore')
+    
+    # Add data for every bin
+    for j in range(0, nDivision):
+        minMag_mag_bin: float = minVal + (binVal * j)
+        maxMag_mag_bin: float = minVal + (binVal *(j+1))
+        p.status(f"{colors['PURPLE']} {j+1}/{nDivision} for '{mag_filter_name}' mag in range [{minMag_mag_bin:.3f}, {maxMag_mag_bin:.3f}]{colors['NC']}")
+        tempParamater = parameterList()
+        tempPM_RA, tempPM_DEC = [], []
+        for tempData in astrodata:
+            # Main condition to define a bin, given by Cordoni et al. (2020)
+            # If data is between the maximum and minimim value for the current bin, keep it
+            mainCondition = minMag_mag_bin <= tempData[key_gaia_table] < maxMag_mag_bin
+            # Second simple condition to avoid masked numpy null values in Color Mag Diagram
+            secondCondition = -25. < tempData[key_gaia_table] <= 25.
+            # If the value lies inside the range of values of the expected bin, then... 
+            if mainCondition and secondCondition:
+                tempParamater.G_BP.append(tempData['phot_bp_mean_mag'])
+                tempParamater.G_RP.append(tempData['phot_rp_mean_mag'])
+                tempParamater.G.append(tempData['phot_g_mean_mag'])
+                tempParamater.as_gof_al.append(tempData['astrometric_gof_al'])
+                tempParamater.parallax.append(tempData['parallax'])
+                tempPM_RA.append(tempData['pmra'])
+                tempPM_DEC.append(tempData['pmdec'])
+                tempParamater.mu_R.append(estimate_mu_sub_R(PM_alpha=tempData['pmra'],PM_delta=tempData['pmdec'],
+                                                            previous_PM_alpha_median=previous_median_PM_RA,
+                                                            previous_PM_delta_median=previous_median_PM_DEC))                                 
+        newBin = Bin(ID=j+1, params=tempParamater, minVal_mag=minMag_mag_bin, maxVal_mag=maxMag_mag_bin)
+        totBins.bins.append(newBin)
+    return totBins, maxVal, minVal, binVal
+
+
+def get_and_check_created_bins(args, astrodata: Table, ellipse_center: ellipseVPDCenter)->TotalBins:
+    """
+    Count the number of elements inside every bin. If a bin has 0 or only 1 element, then we will
+    have to reduce the number of bins in N-1 and create them again. This is repeated until every bin
+    has at least 2 or more elements
+    """
+    n_divisions_for_bins = copy.deepcopy(args.n_divisions)
+    p = log.progress(f"{colors['L_BLUE']}Creating Bins{colors['NC']}")
+    mag_filter_name = get_mag_filter_name(args.set_mag_filter)
+    counter = 0
+    while True:
+        if counter > 0:
+            print(f"{colors['L_RED']}[-] {colors['RED']}Failed with {n_divisions_for_bins+1} bins. Attempting with {n_divisions_for_bins} bins...{colors['NC']}")
+        totalCustomBins, maxVal, minVal, binVal = create_bins(args, astrodata=astrodata,
+                                                          nDivision=n_divisions_for_bins, 
+                                                          ellipse_center=ellipse_center,
+                                                          p=p) 
+        validElementsNumbInBins = check_if_total_bins_has_at_least_2_elems_or_more(totalCustomBins, 
+                                                                                   mag_filter_name,
+                                                                                   n_divisions_for_bins)
+        if validElementsNumbInBins:
+            p.success(f"{colors['PURPLE']}Bins created{colors['NC']}")
+            break
+        n_divisions_for_bins -= 1
+        counter +=1
+        if n_divisions_for_bins < 2:
+            p.failure(f"{colors['RED']}Was not possible to create bins{colors['NC']}")
+            sys.exit(1)
+    if not args.no_print_table_bins:
+        print_values_bins(maxVal, minVal, n_divisions_for_bins, binVal, totalCustomBins, mag_filter_name)
+    return totalCustomBins
+
+
+def eq_straight_line(P1, P2: euclidianPoint) -> (float, float):
+    "Return the equation of a straight line given two points with coordinates P1 = (x1, y1) and P2 = (x2,y2)"
+    points = [(P1.x, P1.y),(P2.x, P2.y)]
+    x_coords, y_coords = zip(*points)
+    A = np.vstack([x_coords,ones(len(x_coords))]).T
+    m, c = lstsq(A, y_coords, rcond=None)[0]
+    # print("Line Solution is y = {m}x + {c}".format(m=m,c=c))
+    return m, c
+
+
+def create_points_to_interpolate(args, totalBins: TotalBins, varToInterpolate: str,
+                                 sigma: float) -> pointsToInterpolate:
+    """
+    Create points that will be used to create interpolation lines that
+    will be used to filter data
+    """
+    # Get the magnitude we are working with
+    filter_name = get_mag_filter_name(args.set_mag_filter)
+    # Create a list that will store the points to interpolate
+    points = pointsToInterpolate()
+    paramsToInterpolate=["as_gof_al", "astrometric_gof_al", "mu_R", "parallax"]
+    # Create basic points to interpolate
+    for index, data in enumerate(totalBins.bins):
+        # Check what Gaia filter are we using
+        if filter_name == "G_RP":
+            data_median_mag: float = data.median_G_RP
+            data_median_mag_stddev: float = data.std_dev_G_RP
+        elif filter_name == "G_BP":
+            data_median_mag: float = data.median_G_BP
+            data_median_mag_stddev: float = data.std_dev_G_BP
+        elif filter_name == "G":
+            data_median_mag: float = data.median_G
+            data_median_mag_stddev: float = data.std_dev_G
+        else:
+            print(f"{warning}{colors['RED']}Invalid filter name: {filter_name}. Exiting...{colors['NC']}")
+            sys.exit(1)
+        if varToInterpolate == "as_gof_al" or varToInterpolate == "astrometric_gof_al":
+            temp_median_var = data.median_as_gof_al
+            temp_std_var = data.std_dev_as_gof_al
+        if varToInterpolate == "mu_R":
+            temp_median_var = data.median_mu_R
+            temp_std_var = data.std_dev_mu_R
+        if varToInterpolate == "parallax":
+            temp_median_var = data.median_parallax
+            temp_std_var = data.std_dev_parallax
+        if varToInterpolate not in paramsToInterpolate:
+            print("Invalid parameter to filter!")
+            sys.exit(1)
+
+        tempPoint = singlePoint(
+                    ID=index+1,
+                    median_value=temp_median_var,
+                    std_value=temp_std_var,
+                    mag_median=data_median_mag,
+                    mag_std=data_median_mag_stddev)
+        points.points.append(tempPoint)
+    # Check that both list have the same size at this point
+    checkLists = len(totalBins.bins) == len(points.points)
+    assert checkLists, "Bins list and point list must have the same size!" 
+    
+    for index in range(0, len(points.points)-1):
+        p1 = euclidianPoint(y=points.points[index].median_value \
+                                + sigma*points.points[index].std_value, 
+                            x=points.points[index].mag_median)
+        p2 = euclidianPoint(y=points.points[index+1].median_value \
+                                + sigma*points.points[index+1].std_value, 
+                            x=points.points[index+1].mag_median)
+        inclination, intersection = eq_straight_line(P1=p1, P2=p2)
+        points.points[index].m = inclination
+        points.points[index].c = intersection
+        
+    # Append first and last points
+    firstPoint = points.points[0]
+    # Check what Gaia filter are we using
+    if filter_name == "G_RP":
+        min_value_mag: float = np.amin(totalBins.bins[0].params.G_RP)
+        max_value_mag: float = np.amax(totalBins.bins[-1].params.G_RP)
+    elif filter_name == "G_BP":
+        min_value_mag: float = np.amin(totalBins.bins[0].params.G_BP)
+        max_value_mag: float = np.amax(totalBins.bins[-1].params.G_BP)
+    elif filter_name == "G":
+        min_value_mag: float = np.amin(totalBins.bins[0].params.G)
+        max_value_mag: float = np.amax(totalBins.bins[-1].params.G)
+    else:
+        print(f"{warning}{colors['RED']}Invalid filter name: {filter_name}. Exiting...{colors['NC']}")
+        sys.exit(1)
+    points.points.insert(0,singlePoint(ID=0, median_value=firstPoint.median_value,
+                         std_value= firstPoint.std_value,
+                         mag_median= min_value_mag,
+                         mag_std = 0.,
+                         m= 0.,
+                         c= firstPoint.median_value + args.sigma * firstPoint.std_value))
+    lastPoint = points.points[-1] 
+    points.points.append(singlePoint(ID=lastPoint.ID + 1,
+                         median_value=lastPoint.median_value,
+                         std_value=lastPoint.std_value,
+                         mag_median=max_value_mag,
+                         mag_std=0.,
+                         m=0.,
+                         c=lastPoint.median_value + args.sigma*lastPoint.std_value))
+    
+    # Re-compute the value for the semi-last point
+    # (we could not do this since we did not have the last point until now)
+    p1 = euclidianPoint(y=points.points[-2].median_value \
+                              + sigma*points.points[-2].std_value, 
+                            x=points.points[-2].mag_median)
+    p2 = euclidianPoint(y=points.points[-1].median_value \
+                              + sigma*points.points[-1].std_value, 
+                            x=points.points[-1].mag_median)
+    inclination, intersection = eq_straight_line(P1=p1, P2=p2)
+    points.points[-2].m = inclination
+    points.points[-2].c = intersection
+    points.points[-1].c = points.points[-2].c
+    return points
+
+
+def interpolate_data_var(usefulData: parameterList,
+                       data_to_interpolate:Table,
+                       interPoints: pointsToInterpolate,
+                       variableName: str,
+                       sigma: float,
+                       interPoints2: pointsToInterpolate = None
+                       ) -> np.ndarray:
+    mask_array = []
+    notfound=0
+    parameter_to_get_list = which_parameter(parameters_in_list=usefulData,paramName=variableName)
+    for j in range(0, len(usefulData.G_RP)):
+        G_RP = usefulData.G_RP[j]
+        parameterToCompare = parameter_to_get_list[j]
+        for index in range (0, len(interPoints.points)-1):
+            lower_G_RP = interPoints.points[index].mag_median
+            upper_G_RP = interPoints.points[index+1].mag_median
+            isInRange = lower_G_RP <= G_RP < upper_G_RP
+            if isInRange:
+                median_val = interPoints.points[index].median_value
+                std_val = interPoints.points[index].std_value
+                m_val = interPoints.points[index].m
+                c_val = interPoints.points[index].c
+                evaluate_value = m_val * G_RP + c_val
+                # This will not be 'None' for "parallax" parameter
+                if interPoints2 != None:
+                    median_val2 = interPoints2.points[index].median_value
+                    std_val2 = interPoints2.points[index].std_value
+                    m_val2 = interPoints2.points[index].m
+                    c_val2 = interPoints2.points[index].c
+                    if index != 0:
+                        evaluate_value2 = m_val2 * G_RP + c_val2
+                    else:
+                        evaluate_value2 = median_val2 - sigma * std_val2
+                        
+                    if evaluate_value2 < parameterToCompare < evaluate_value:
+                        mask_array.append(True)
+                    else:
+                        mask_array.append(False)
+                    
+                # If we are only comparing with respect to one line,just keep the points at
+                # the left of them
+                if interPoints2 == None:
+                    if parameterToCompare < evaluate_value:
+                        mask_array.append(True)
+                    if parameterToCompare >= evaluate_value:
+                        mask_array.append(False)
+                break
+            if index == len(interPoints.points)-2:
+                notfound+=1
+                mask_array.append(True)
+            
+    checkLengths = len(mask_array) == len(data_to_interpolate['phot_rp_mean_mag'])
+    if not checkLengths:
+        print("Mask length and data length are not equal!")
+        print(f"Mask length: {len(mask_array)}")
+        print(f"{len(data_to_interpolate['phot_rp_mean_mag'])}")
+        sys.exit(1)
+    # This error can happen if the upper limit, when defining bias,
+    # is not the same as the 'faint_limit' in 1st step of Notebook
+    # assert checkLengths, "Mask length and data length are not equal!"
+    return  np.asarray(mask_array)
+
+
+def doInterpolation(args, totalBins, dataToFilter, varToInterpolate, sigma, ellipse_center):
+    usefulParameters = get_important_parameters(args, original_data=dataToFilter, ellipse_center=ellipse_center)
+    if varToInterpolate != 'parallax':
+        points_to_interpolate = create_points_to_interpolate(args, totalBins=totalBins,
+                                                             varToInterpolate=varToInterpolate,
+                                                             sigma=sigma)
+        interpolated_stars = interpolate_data_var(usefulParameters, dataToFilter, 
+                                                  points_to_interpolate, 
+                                                  varToInterpolate,
+                                                  args.sigma)
+        data_filtered = dataToFilter[interpolated_stars]
+        return data_filtered, points_to_interpolate
+        
+    if varToInterpolate == 'parallax':
+        points_to_interpolate_right = createPointsToInterpolate(totalBins=totalBins,
+                                        varToInterpolate=varToInterpolate,
+                                        sigma=sigma)
+        points_to_interpolate_left = createPointsToInterpolate(totalBins=totalBins,
+                                    varToInterpolate=varToInterpolate,
+                                    sigma= -1.0*sigma)
+        interpolated_stars = interpolateDataVar(usefulParameters, dataToFilter, 
+                                                points_to_interpolate_right,
+                                                varToInterpolate,
+                                                interPoints2=points_to_interpolate_left)
+        data_filtered = dataToFilter[interpolated_stars]
+        return data_filtered, points_to_interpolate_left, points_to_interpolate_right
+
+
+def do_and_print_interpolation(args, totalBins: TotalBins, preData: Table, len_originalData: int,
+                               varToInterpolate: str, sigma: float, ellipse_center: ellipseVPDCenter):
+    print(f"Interpolating '{varToInterpolate}' parameter for a value of {sigma} σ...")
+    if varToInterpolate != "parallax":
+        data_filtered_by_param, points_separating_param = doInterpolation(args, totalBins=totalBins,
+                                                                          dataToFilter=preData,
+                                                                          varToInterpolate=varToInterpolate,    
+                                                                          sigma=sigma,
+                                                                          ellipse_center=ellipse_center)
+    if varToInterpolate == "parallax":
+        data_filtered_by_param, points_right, points_left = doInterpolation(totalBins=totalBins,
+                                                            dataToFilter=preData,
+                                                            varToInterpolate=varToInterpolate,    
+                                                            sigma=sigma)
+    print_n_times=70
+    print("#"*print_n_times)
+    print(f"Original data length (N): {len_originalData}")
+    print(f"Modified data length (N): {len(data_filtered_by_param)}")
+    print("Data filtered/discarded:", end = " ")
+    print(f"{round(((len_originalData-len(data_filtered_by_param))/(1.0*len_originalData))*100,2)}%")
+    print("#"*print_n_times)
+    if varToInterpolate != 'parallax':
+        return data_filtered_by_param, points_separating_param
+    else: 
+        return data_filtered_by_param, points_right, points_left
+
+
+def check_bin_extremes(args, data_to_check, binsToCheck):
+    """
+    Since only the extremes (max and min values) of bins at the top and bottom decide
+    the size of the divisions/rest of the bins, it is unnecesary to create divide 
+    bins if the extremes have not changed
+    """
+    # Select magnitude column
+    mag_filter_name = get_mag_filter_name(args.set_mag_filter)
+    key_gaia_table = select_gaia_filter_key_param(mag_filter_name)
+    # Select G_RP column
+    mag_data = copy.deepcopy(data_to_check[key_gaia_table])
+    max_value, min_value = np.amax(mag_data), np.amin(mag_data)
+    min_totBins = binsToCheck.bins[0].minVal_mag
+    max_totBins = binsToCheck.bins[-1].maxVal_mag
+    print(max_value, min_value, min_totBins, max_totBins)
+    return
+
+
+def Cordoni_algorithm(args, totalBins: TotalBins, original_data: Table, 
+                      iteration_number: int, ellipse_center: ellipseVPDCenter):
+    # Create a copy of the original data, so it is not modified
+    print_n_times = 70
+    print("="*print_n_times)
+    print(f"Iteration #{iteration_number}")
+    print_n_times = 70
+    data_to_work = copy.deepcopy(original_data)
+    if not args.no_as_gof_al:
+        data_filtered, points_to_plot = do_and_print_interpolation(args, totalBins, data_to_work, len(data_to_work),
+                                                                   'astrometric_gof_al', args.sigma, ellipse_center)
+    return data_filtered
+
+        
+def recycle_center_ellipse(identified: str)->bool:
+    if identified == "GlobularCluster" or identified == "OpenCluster":
+        return True
+    elif identified == "Other":
+        return False
+    else:
+        return False
+
+
+def extractCordoniData(args, subcommand, subsubcommand):
+    # Check if the Gaia filter provided by the user is valid
+    # Only allowed values are: {G, G_RP, G_RP}
+    # If this function does not exit then the user has provided a valid Gaia filter
+    _ = get_mag_filter_name(args.set_mag_filter)
+    # Get the original data from file. Since the file is required 'object_info' (the second variable returned) will always be "None" variable
+    original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
+    # Check if we want to recycle the center for the ellipse in the VPD
+    # If the object was found in Archive then it is not necessary to use it again
+    # If it is a custom object, we must re-compute the 'pmra' and 'pmdec' median
+    recycleCenterEllipse = recycle_center_ellipse(object_info)
+    # Get the name of the object name based on the filename provided
+    file_Path_object = Path(args.file)
+    # Get only the filename. Without its path and without its file extension
+    filename_original_without_extension = str(file_Path_object.stem)
+    # Get the object name from filename
+    obj_name = get_filename_in_list(filename_original_without_extension)
+    # Get the coordinates for ellipse center
+    recycleCenterEllipse = False
+    #for iterator in range(1, args.n_iterations+1):
+    for iterator in range(1, 2):
+        if iterator == 1:
+            data_to_work = copy.deepcopy(original_data)
+        if iterator != 1:
+            data_to_work = copy.deepcopy(filtered_data)
+        if iterator == 1 or not recycleCenterEllipse:
+            if iterator != 1:
+                print(f"{sb} {colors['GREEN']} Re-computing the ellipse center{colors['NC']}")
+            centerEllipse, identified = get_pmra_pmdec_for_VPD(args, obj_name, original_data=data_to_work, useMedian=True, fill=True)
+            recycleCenterEllipse = recycle_center_ellipse(identified)
+        print(f"pmra {centerEllipse.pmra}, pmdec {centerEllipse.pmdec}")
+        print(f"args set limit is {args.set_limits}")
+        totalCustomBins = get_and_check_created_bins(args, astrodata=original_data, ellipse_center=centerEllipse)
+        filtered_data = Cordoni_algorithm(args, totalCustomBins, original_data, iterator, centerEllipse)
+
+
+
+
+def extractEllipseData(args, subcommand, subsubcommand):
+    # Check if the user has provided the correct number of parameters for width and height, which must be 2
+    # Also sort the lists so, for example, the first item of args.width is the minimum and the second is
+    # the maximum value
+    check_width_and_height_provided_for_ellipse(args)
+    # Get the original data from file. Since the file is required 'object_info' (the second variable returned) will always be "None" variable
+    original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
+    # Get the name of the object name based on the filename provided
+    file_Path_object = Path(args.file)
+    # Get only the filename. Without its path and without its file extension
+    filename_original_without_extension = str(file_Path_object.stem)
+    # Get the object name from filename
+    obj_name = get_filename_in_list(filename_original_without_extension)
+    # Get the coordinates for ellipse center
+    centerEllipse = get_pmra_pmdec_for_VPD(args, obj_name)
+    while True:
+        width_it, height_it, incl_it = create_IteratorClass_objects_for_ellipse(args)
+        # Create a simple process to track the results
+        p = log.progress("Ellipse")
+        # Get the "optimal ellipse", which maximizes the number of objects inside it
+        ellipse = count_stars_inside_ellipse(centerEllipse.pmra, centerEllipse.pmdec, original_data, 
+                                             width_it, height_it, incl_it, p)
+        # Print some parameters related to this 'optimal' ellipse
+        print_found_ellipse_attributes(ellipse)
+        ellipse_mask, colors_array = check_if_data_lies_inside_ellipse(original_data, ellipse)
+        filtered_data = filter_data_by_mask(original_data, ellipse_mask)
+        print_before_and_after_filter_length(len(original_data), len(filtered_data))
+        try:
+            plot_ellipse_in_VPD(args, obj_name, original_data, ellipse, centerEllipse.pmra, 
+                                centerEllipse.pmdec, colors_array)
+        except:
+            print(f"{warning} {colors['RED']}Something happened when trying to plot VPD and ellipse. Continuing without plotting...{colors['NC']}")
+            break
+        isUserHappy = ask_to(f"{colors['GREEN']}{sb} Are you happy with this result? {colors['RED']}[Y]es/[N]o{colors['GREEN']}: {colors['NC']}")
+        if isUserHappy:
+            break
+        else:
+            wantToContinue = ask_to(f"{colors['RED']}{sb} Do you want to continue with the program? {colors['PURPLE']}[Y]es/[N]o{colors['RED']}: {colors['NC']}")
+            if not wantToContinue:
+                print(f"\n{colors['L_CYAN']}Bye!{colors['NC']}")
+                sys.exit(0)
+            else:
+                set_new_values_for_ellipse_parameters(args, 'width')
+                set_new_values_for_ellipse_parameters(args, 'height')
+                set_new_values_for_ellipse_parameters(args, 'inclination')
+    p = log.progress(f"{colors['PINK']}Saving data{colors['NC']}")
+    # If the user provided a file, try to obtain the "identifiedAs" parameter based on its path
+    object_info_identified = decide_parameters_to_save_data(args, object_info)
+    # Save data if needed
+    if not args.no_save_output:
+        save_data_output(args, subcommand, subsubcommand, object_info_identified, filtered_data)
+        p.success(f"{colors['GREEN']}Data succesfully saved{colors['NC']}")
+    else:
+        p.failure(f"{colors['RED']}Data has not been saved{colors['NC']}")
+    return filtered_data
+
 
 def extractFilterParameters(args, subcommand: str, subsubcommand: str):
     original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
@@ -2144,6 +2864,8 @@ def extractCommand(args)->None:
         if args.subsubcommand == "ellipse":
             filtered_data = extractEllipseData(args, 'filter', 'ellipse')
             sys.exit(0)
+        if args.subsubcommand == "cordoni":
+            extractCordoniData(args, 'filter', 'cordoni')
 
 
  
