@@ -1128,6 +1128,7 @@ class onlineCantanObject:
     ra: float # deg, J2000
     dec: float # deg, J2000
     r50: float # deg - Radius containing half the members
+    n_stars: int # Number of stars with a probability over 0.7
     pmra: float # mas / yr
     e_pmra: float # mas / yr
     pmdec: float # mas / yr
@@ -1143,7 +1144,7 @@ class onlineCantanObject:
 
 
     
-def get_extra_object_info_open_cluster(args, p):
+def get_extra_object_info_open_cluster(args, p, set_warning=True):
     """
     Request Open Cluster data from Cantat-Gaudin et al. (2020, A&A, 640, A1) if available
     """
@@ -1179,21 +1180,50 @@ def get_extra_object_info_open_cluster(args, p):
                               columns[0].lower().replace('_', ''), columns[0].lower().replace('_', '-')]
 
             if args.name.lower() in possible_names:
-                cantat_object = onlineCantanObject(name=f"{columns[0].replace('_',' ')}",
-                                                   ra = float(columns[1]),
-                                                   dec = float(columns[2]),
-                                                   r50 = float(columns[5]),
-                                                   pmra = float(columns[7]),
-                                                   e_pmra = float(columns[8]),
-                                                   pmdec = float(columns[9]),
-                                                   e_pmdec = float(columns[10]),
-                                                   parallax = float(columns[11]),
-                                                   e_parallax = float(columns[12]),
-                                                   log_age = float(columns[14]),
-                                                   a_v = float(columns[15]),
-                                                   d_modulus=float(columns[16]),
-                                                   distance=float(columns[17]),
-                                                   rgc=float(columns[-1]))
+                columns = line.split()
+                name = columns[0].replace('_',' ')
+                ra = float(columns[1])
+                dec = float(columns[2])
+                r50 = float(columns[5])
+                n_stars = int(columns[6])
+                pmra = float(columns[7])
+                e_pmra = float(columns[8])
+                pmdec = float(columns[9])
+                e_pmdec = float(columns[10])
+                parallax = float(columns[11])
+                e_parallax = float(columns[12])
+                # Since some values in Cantat-Gaudin et al. study are filled with '---' values, if it that is the case
+                # fill them with -9999 (similar as was done for APOGEE survey)
+                try:
+                    log_age = float(columns[14])
+                    a_v = float(columns[15])
+                    d_modulus=float(columns[16])
+                    distance=float(columns[17])
+                    rgc=float(columns[-1])
+                except ValueError:
+                    if set_warning:
+                        print(f"{warning} {colors['RED']}Some parameters are not defined in {cantat_gaudin_study.show_study()}. Filling with '-9999' those values{colors['NC']}")
+                    log_age = -9999.
+                    a_v = -9999.
+                    d_modulus= -9999.
+                    distance= -9999.
+                    rgc= -9999.
+                cantat_object = onlineCantanObject(name=name,
+                                                   ra = ra,
+                                                   dec = dec,
+                                                   r50 = r50,
+                                                   n_stars=n_stars,
+                                                   pmra = pmra,
+                                                   e_pmra = e_pmra,
+                                                   pmdec = pmdec,
+                                                   e_pmdec = e_pmdec,
+                                                   parallax = parallax,
+                                                   e_parallax = e_parallax,
+                                                   log_age = log_age,
+                                                   a_v = a_v,
+                                                   d_modulus=d_modulus,
+                                                   distance=distance,
+                                                   rgc=rgc)
 
                 p.success(f"{colors['GREEN']} Data found as {colors['RED']}Open Cluster{colors['GREEN']} from {cantat_gaudin_study.show_study()} {colors['NC']}")
                 return True, cantat_object
