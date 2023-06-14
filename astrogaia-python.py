@@ -346,14 +346,17 @@ def parseArgs():
                                                                  help="If provided, set explicitly Median PMRA value. Usually where the data is centered in VPD.")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--pmdec', type=float, default= 0.0,
                                                                  help="If provided, set explicitly Median PMDEC value. Usually where the data is centered in VPD.")
-    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-print-table-bins', action="store_true",
-                                                                 help="Do not print bins generated")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-print-table-bins', action="store_true", help="Do not print bins generated")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-as-gof-al', action="store_true",
                                                                  help="Avoid filtering data by 'as_gof_al' parameter")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-mu-r', action="store_true",
                                                                  help="Avoid filtering data by 'μ_R' parameter")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-parallax', action="store_true",
                                                                  help="Avoid filtering data by 'parallax' parameter")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-plot-as-gof-al', action="store_true", help="Do not plot 'astrometric_gof_al' process")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--plot-dark-mode', action="store_true", help="Plot in dark mode (adapt colors in plots to this mode)")
+
+
 
 
 
@@ -2104,7 +2107,7 @@ class TotalBins:
     bins: list[Bin] = field(default_factory=list)
 
 
-def get_important_parameters(args, original_data: Table, ellipse_center: ellipseVPDCenter)->parameterList:
+def get_important_parameters(original_data: Table, ellipse_center: ellipseVPDCenter)->parameterList:
     """
     Extract only important parameters that will be used later for Cordoni et al. (2018, 2020) algorithm
     """
@@ -2264,7 +2267,7 @@ def print_values_bins(maxValue: float, minValue: float, nBins: int,
 
     for data in totalBins.bins:
         if filter_name == "G_RP":
-            data_median_mag: float = data.params.G_RP
+            data_median_mag: float = data.median_G_RP
             data_median_mag_stddev: float = data.std_dev_G_RP
             len_data_mag = len(data.params.G_RP)
         elif filter_name == "G_BP":
@@ -2538,13 +2541,8 @@ def create_points_to_interpolate(args, totalBins: TotalBins, varToInterpolate: s
     return points
 
 
-def interpolate_data_var(usefulData: parameterList,
-                       data_to_interpolate:Table,
-                       interPoints: pointsToInterpolate,
-                       variableName: str,
-                       sigma: float,
-                       interPoints2: pointsToInterpolate = None
-                       ) -> np.ndarray:
+def interpolate_data_var(usefulData: parameterList, data_to_interpolate:Table, interPoints: pointsToInterpolate,
+                         variableName: str,sigma: float, interPoints2: pointsToInterpolate = None) -> np.ndarray:
     mask_array = []
     notfound=0
     parameter_to_get_list = which_parameter(parameters_in_list=usefulData,paramName=variableName)
@@ -2601,30 +2599,19 @@ def interpolate_data_var(usefulData: parameterList,
     return  np.asarray(mask_array)
 
 
-def doInterpolation(args, totalBins, dataToFilter, varToInterpolate, sigma, ellipse_center):
-    usefulParameters = get_important_parameters(args, original_data=dataToFilter, ellipse_center=ellipse_center)
+def do_interpolation(args, totalBins, dataToFilter, varToInterpolate, sigma, ellipse_center):
+    usefulParameters = get_important_parameters(original_data=dataToFilter, ellipse_center=ellipse_center)
     if varToInterpolate != 'parallax':
-        points_to_interpolate = create_points_to_interpolate(args, totalBins=totalBins,
-                                                             varToInterpolate=varToInterpolate,
-                                                             sigma=sigma)
-        interpolated_stars = interpolate_data_var(usefulParameters, dataToFilter, 
-                                                  points_to_interpolate, 
-                                                  varToInterpolate,
-                                                  args.sigma)
+        points_to_interpolate = create_points_to_interpolate(args, totalBins=totalBins, varToInterpolate=varToInterpolate, sigma=sigma)
+        interpolated_stars = interpolate_data_var(usefulParameters, dataToFilter, points_to_interpolate, varToInterpolate, args.sigma)
         data_filtered = dataToFilter[interpolated_stars]
         return data_filtered, points_to_interpolate
         
     if varToInterpolate == 'parallax':
-        points_to_interpolate_right = createPointsToInterpolate(totalBins=totalBins,
-                                        varToInterpolate=varToInterpolate,
-                                        sigma=sigma)
-        points_to_interpolate_left = createPointsToInterpolate(totalBins=totalBins,
-                                    varToInterpolate=varToInterpolate,
-                                    sigma= -1.0*sigma)
-        interpolated_stars = interpolateDataVar(usefulParameters, dataToFilter, 
-                                                points_to_interpolate_right,
-                                                varToInterpolate,
-                                                interPoints2=points_to_interpolate_left)
+        points_to_interpolate_right = create_points_to_interpolate(args, totalBins=totalBins, varToInterpolate=varToInterpolate, sigma=sigma)
+        points_to_interpolate_left = create_points_to_interpolate(args, totalBins=totalBins, varToInterpolate=varToInterpolate, sigma= -1.0*sigma)
+        interpolated_stars = interpolate_data_var(usefulParameters, dataToFilter, points_to_interpolate_right, varToInterpolate, sigma=sigma,
+                                                  interPoints2=points_to_interpolate_left)
         data_filtered = dataToFilter[interpolated_stars]
         return data_filtered, points_to_interpolate_left, points_to_interpolate_right
 
@@ -2633,16 +2620,17 @@ def do_and_print_interpolation(args, totalBins: TotalBins, preData: Table, len_o
                                varToInterpolate: str, sigma: float, ellipse_center: ellipseVPDCenter):
     print(f"Interpolating '{varToInterpolate}' parameter for a value of {sigma} σ...")
     if varToInterpolate != "parallax":
-        data_filtered_by_param, points_separating_param = doInterpolation(args, totalBins=totalBins,
+        data_filtered_by_param, points_separating_param = do_interpolation(args, totalBins=totalBins,
                                                                           dataToFilter=preData,
                                                                           varToInterpolate=varToInterpolate,    
                                                                           sigma=sigma,
                                                                           ellipse_center=ellipse_center)
     if varToInterpolate == "parallax":
-        data_filtered_by_param, points_right, points_left = doInterpolation(totalBins=totalBins,
-                                                            dataToFilter=preData,
-                                                            varToInterpolate=varToInterpolate,    
-                                                            sigma=sigma)
+        data_filtered_by_param, points_right, points_left = do_interpolation(args, totalBins=totalBins,
+                                                                             dataToFilter=preData,
+                                                                             varToInterpolate=varToInterpolate,    
+                                                                             sigma=sigma,
+                                                                             ellipse_center=ellipse_center)
     print_n_times=70
     print("#"*print_n_times)
     print(f"Original data length (N): {len_originalData}")
@@ -2674,17 +2662,130 @@ def check_bin_extremes(args, data_to_check, binsToCheck):
     return
 
 
-def Cordoni_algorithm(args, totalBins: TotalBins, original_data: Table, 
+def plot_interpolation(args, object_name: str, filtered_data: Table, original_data: Table, center_ellipse: ellipseVPDCenter,
+                       points_data, variable_name: str, axis_name : str, points_data_left: bool = False)->None:
+    """
+    Plot the data interpolated and filtered using Cordoni (2018) algorithm
+    """
+    # Create some lists that will store the data (so we do not touch the original one)
+    filter_name = get_mag_filter_name(args.set_mag_filter)
+    gaia_key_mag = select_gaia_filter_key_param(filter_name)
+    x = []
+    y = []
+    # Since mu_R is not an intrinsic variable from Gaia Release, compute it and save it
+    if variable_name == 'mu_R':
+        # Compute mu_R for filtered data
+        data_x = [estimate_mu_sub_R(x['pmra'], x['pmdec'], center_ellipse.pmra, center_ellipse.pmdec) for x in filtered_data]
+        data_y = filtered_data[gaia_key_mag]
+        # Compute mu_R for original data
+        gaia_x = [estimate_mu_sub_R(x['pmra'], x['pmdec'], center_ellipse.pmra, center_ellipse.pmdec) for x in original_data]
+        gaia_y = original_data[gaia_key_mag]
+    else:
+        # Get filtered data and its respective variable to compare
+        data_x = filtered_data[variable_name]
+        data_y = filtered_data[gaia_key_mag]
+
+        # Get original data and its respective variable to compare
+        gaia_x = original_data[variable_name]
+        gaia_y = original_data[gaia_key_mag]
+    # The original data must have a size equal or bigger than filtered data, so check it
+    difference = len(gaia_x) - len(data_x)
+    if difference < 0:
+        print("Error. The difference between original data and filtered data must be higher than 0")
+        sys.exit(1)
+    # Get the points that were used to interpolate
+    for j in range(0, len(points_data.points)):
+        y.append(points_data.points[j].mag_median)
+        x.append(points_data.points[j].median_value + args.sigma * points_data.points[j].std_value)
+    # If we are plotting 'parallax', we need points also at the left, so add them    
+    if points_data_left:
+        x_left = []
+        y_left = []
+        for j in range(0, len(points_data_left.points)):
+            y.append(points_data.points[j].mag_median)
+            x_left.append(points_data_left.points[j].median_value - args.sigma * points_data_left.points[j].std_value) 
+    
+    fig ,ax = plt.subplots()
+    label_fontsize = 35
+    matplotlib.rc('xtick', labelsize=label_fontsize - 5) 
+    matplotlib.rc('ytick', labelsize=label_fontsize - 5)
+    plt.title(object_name.upper(), fontsize=label_fontsize)
+    ax.xaxis.label.set_size(label_fontsize)
+    ax.yaxis.label.set_size(label_fontsize)
+    if filter_name == "G_RP":
+        y_label_text = r'$G_{RP}$ $({\rm mag})$'
+    if filter_name == "G_BP":
+        y_label_text = r'$G_{BP}$ $({\rm mag})$'
+    if filter_name == "G":
+        y_label_text = r'$G$ $({\rm mag})$'
+    ax.set(xlabel=axis_name, 
+           ylabel=y_label_text)
+    ax.tick_params(which='both', width=4.5, top='on')
+    ticksize = 14
+    ax.tick_params(which='major',length=ticksize, direction = 'in')
+    ax.tick_params(which='minor',length=ticksize/2., direction = 'in')
+    ax.yaxis.set_ticks_position('both')
+    plt.minorticks_on()
+    if args.plot_dark_mode:
+        plt.style.use('dark_background')
+        original_data_color = "#00ddff"
+        filtered_data_color = "#ff4600"
+        linestyle = "-g"
+        color_linestyle = "#00FE08"
+    else:
+        plt.style.use('default')
+        original_data_color = "#274e13"
+        filtered_data_color = "#cc0000"
+        linestyle = "-b"
+        color_linestyle = "#0078ff"
+    # Plot the line dividing the selected vs eliminated stars
+    plt.plot(x,y, linestyle)
+    plt.plot(x,y, marker='o', color=color_linestyle)
+    if points_data_left:
+        plt.plot(x_left,y_left, linestyle)
+        plt.plot(x_left,y_left, marker='o', color=color_linestyle)
+        
+    # Original data
+    plt.scatter(gaia_x, gaia_y, s=5.0, c = original_data_color, edgecolors='none')
+    # Filtered data
+    plt.scatter(data_x, data_y, s=5.0, c = filtered_data_color, edgecolors='none')
+    anchored_text = AnchoredText(r'$N_{original}$ = '+str(len(gaia_x))+'\n'
+                                 +r'$N_{filtered}$ = '+str(len(data_x))+'\n'
+                                 +r'$N_{discarded}$ = ' + str(difference)+' (' 
+                                 + str(round( difference/(len(gaia_x)*1.0) * 100 ,2))
+                                 +'%)', loc='upper left', frameon=False,
+                                 prop=dict(size=25))
+    ax.add_artist(anchored_text)
+    plt.rcParams["figure.figsize"] = [13.50, 17.50]
+    plt.rcParams["figure.autolayout"] = True
+    plt.gca().invert_yaxis()
+    plt.show()
+
+
+def Cordoni_algorithm(args, object_name: str, totalBins: TotalBins, original_data: Table, 
                       iteration_number: int, ellipse_center: ellipseVPDCenter):
-    # Create a copy of the original data, so it is not modified
     print_n_times = 70
     print("="*print_n_times)
     print(f"Iteration #{iteration_number}")
     print_n_times = 70
-    data_to_work = copy.deepcopy(original_data)
+    # Create a deepcopy of the original data, so it is not modified
+    data_filtered = copy.deepcopy(original_data)
     if not args.no_as_gof_al:
-        data_filtered, points_to_plot = do_and_print_interpolation(args, totalBins, data_to_work, len(data_to_work),
+        data_filtered, points_to_plot = do_and_print_interpolation(args, totalBins, data_filtered, len(data_filtered),
                                                                    'astrometric_gof_al', args.sigma, ellipse_center)
+        # If we are in the first iteration, show a plot showing original and filtered data
+        if iteration_number == 1 and not args.no_plot_as_gof_al:
+            # Plot in 'dark mode'
+            if args.plot_dark_mode:
+                with plt.style.context("dark_background"):
+                    plot_interpolation(args, object_name, data_filtered, original_data, ellipse_center,
+                                       points_to_plot, "astrometric_gof_al", "astrometric_gof_al")
+            # Plot in 'light mode' (default)
+            else:
+                with plt.style.context("default"):
+                    plot_interpolation(args, object_name, data_filtered, original_data, ellipse_center,
+                                       points_to_plot, "astrometric_gof_al", "astrometric_gof_al")
+
     return data_filtered
 
         
@@ -2730,9 +2831,7 @@ def extractCordoniData(args, subcommand, subsubcommand):
         print(f"pmra {centerEllipse.pmra}, pmdec {centerEllipse.pmdec}")
         print(f"args set limit is {args.set_limits}")
         totalCustomBins = get_and_check_created_bins(args, astrodata=original_data, ellipse_center=centerEllipse)
-        filtered_data = Cordoni_algorithm(args, totalCustomBins, original_data, iterator, centerEllipse)
-
-
+        filtered_data = Cordoni_algorithm(args, obj_name, totalCustomBins, original_data, iterator, centerEllipse)
 
 
 def extractEllipseData(args, subcommand, subsubcommand):
@@ -2749,7 +2848,7 @@ def extractEllipseData(args, subcommand, subsubcommand):
     # Get the object name from filename
     obj_name = get_filename_in_list(filename_original_without_extension)
     # Get the coordinates for ellipse center
-    centerEllipse = get_pmra_pmdec_for_VPD(args, obj_name)
+    centerEllipse, _ = get_pmra_pmdec_for_VPD(args, obj_name)
     while True:
         width_it, height_it, incl_it = create_IteratorClass_objects_for_ellipse(args)
         # Create a simple process to track the results
