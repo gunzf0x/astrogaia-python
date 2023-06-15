@@ -2198,6 +2198,12 @@ def estimate_mu_sub_R(PM_alpha: float,
                     np.power(PM_delta - previous_PM_delta_median, 2) )
 
 
+def check_if_using_custom_limits_for_mags(args)->None:
+    if args.set_limits:
+        print(f"{sb_v2} {colors['GREEN']}Using custom mag limits: {colors['BLUE']}[{args.mag_lower_limit}, {args.mag_upper_limit}]{colors['NC']}")
+        return
+    return
+
 def check_min_and_max_values(minValue: float, maxValue: float, useCustomLimits: bool,
                              lower_mag: float, upper_mag: float,
                              default_lower_mag: float =10.5, default_upper_mag: float =19.5)->(float, float):
@@ -2210,7 +2216,7 @@ def check_min_and_max_values(minValue: float, maxValue: float, useCustomLimits: 
     if useCustomLimits: # if the user wants to use custom values for upper and lower limits...
         Cordoni_lower_mag = lower_mag
         Cordoni_upper_mag = upper_mag
-        print(f"[+] Using Custom limits: [{Cordoni_lower_mag}, {Cordoni_upper_mag}]")
+        
         
     if not useCustomLimits: # if not, check if they surpass acceptables values. 
                             # If they do, replace them...
@@ -2854,6 +2860,8 @@ def extractCordoniData(args, subcommand, subsubcommand):
     obj_name = get_filename_in_list(filename_original_without_extension)
     # Get the coordinates for ellipse center
     recycleCenterEllipse = False
+    # Check if the user is using custom limits. If so, print a simple message
+    check_if_using_custom_limits_for_mags(args)
     #for iterator in range(1, args.n_iterations+1):
     for iterator in range(1, 2):
         if iterator == 1:
