@@ -3164,6 +3164,7 @@ def plotCommand(args) -> None:
     """
     Plot data
     """
+    print("Function still under construction. Come later...")
     if args.subcommand == 'raw':
         pass
     return
