@@ -342,23 +342,25 @@ def parseArgs():
                                                                  help="Maximum magnitude to start creating bins")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--mag-lower-limit', type=float, default=10.5,
                                                                  help='Minimum magnitude to start creating bins')
-    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-want-to-print-bins', action='store_true',
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-print-bins', action='store_true',
                                                                  help='Do not print details for bins created')
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--pmra', type=float, default=0.0,
                                                                  help="If provided, set explicitly Median PMRA value. Usually where the data is centered in VPD.")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--pmdec', type=float, default= 0.0,
                                                                  help="If provided, set explicitly Median PMDEC value. Usually where the data is centered in VPD.")
-    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-print-table-bins', action="store_true", help="Do not print bins generated")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-as-gof-al', action="store_true",
                                                                  help="Avoid filtering data by 'as_gof_al' parameter")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-mu-R', action="store_true",
                                                                  help="Avoid filtering data by 'μ_R' parameter")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-parallax', action="store_true",
                                                                  help="Avoid filtering data by 'parallax' parameter")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--show-all-plots', action="store_true",
+                                                                 help = "Show all the plots generated in all the iterations")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-plot-as-gof-al', action="store_true", help="Do not plot 'astrometric_gof_al' process")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-plot-mu-R', action="store_true", help="Do not plot 'μ_R' process")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-plot-parallax', action="store_true", help="Do not plot 'parallax' process")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--plot-dark-mode', action="store_true", help="Plot in dark mode (adapt colors in plots to this mode)")
+    extract_subcommand_filter_subsubcommand_cordoni.add_argument('--re-compute-ellipse-center', action="store_true", help="Forces to re-compute the ellipse center even if the was found or not in Archives.")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--no-save-output', action="store_true", help="Do not save data output")
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
@@ -1052,7 +1054,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']}Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
         
@@ -1504,15 +1506,19 @@ def ask_to(ask_text: str, max_attempts=10)->bool | None:
         sys.exit(1)
 
 
-def print_before_and_after_filter_length(original_length: int, filtered_length: int, n_prints=50)->None:
+def print_before_and_after_filter_length(original_length: int, filtered_length: int, n_prints=70)->None:
+    # Get the user's terminal width and compute its half size
+    terminal_width = shutil.get_terminal_size().columns
+    total_width = terminal_width // 2
+    # Pick some random chars and colors to print
     pick_color = randomColor()
     random_char = randomChar()
-    separator = f"{pick_color}{random_char*n_prints}{colors['NC']}"
+    separator = f"{pick_color}{random_char*total_width}{colors['NC']}"
     print()
     print(separator)
-    print(f"  -> Original data length: {colors['PURPLE']}{original_length}{colors['NC']}")
-    print(f"  -> Filtered data length: {colors['BLUE']}{filtered_length}{colors['NC']}")
-    print(f"  -> \"Survival\" data:      {colors['BLUE']}{((filtered_length/original_length)*100):.2f}%{colors['NC']}")
+    print(f"  {colors['BROWN']}-> {colors['RED']}Original data size: {colors['PURPLE']}{original_length}{colors['NC']}")
+    print(f"  {colors['BROWN']}-> {colors['GREEN']}Filtered data size: {colors['BLUE']}{filtered_length}{colors['NC']}")
+    print(f"  {colors['BROWN']}-> {colors['L_GREEN']}\"Survival\" data:    {colors['L_BLUE']}{((filtered_length/original_length)*100):.2f}%{colors['NC']}")
     print(separator)
     print()
     return None
@@ -1627,9 +1633,9 @@ def get_pmra_pmdec_for_VPD(args, obj_name, original_data:Table | None = None, us
             print(f"{colors['RED']}    You will have to re-run the program providing '--pmra' and '--pmdec' parameters.{colors['NC']}")
             sys.exit(1)
         if object_info.identifiedAs == "GlobularCluster":
-            print(f"{sb} {colors['BLUE']} Object found in Archives. Using values from: {colors['PURPLE']}Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
+            print(f"{sb} {colors['BLUE']}Object found in Archives. Using values from: {colors['PURPLE']}Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
         if object_info.identifiedAs == "OpenCluster":
-            print(f"{sb} {colors['BLUE']} Object found in Archives. Using values from: {colors['PURPLE']}Cantat-Gaudin et al. (2020, A&A, 640, A1){colors['NC']}")
+            print(f"{sb} {colors['BLUE']}Object found in Archives. Using values from: {colors['PURPLE']}Cantat-Gaudin et al. (2020, A&A, 640, A1){colors['NC']}")
         print(f"    {sb_v2} pmra:  {colors['CYAN']}{object_info.pmra} (mas/yr){colors['NC']}")
         print(f"    {sb_v2} pmdec: {colors['CYAN']}{object_info.pmdec} (mas/yr){colors['NC']}")
         pmra, pmdec = object_info.pmra, object_info.pmdec
@@ -2211,12 +2217,6 @@ def estimate_mu_sub_R(PM_alpha: float,
                     np.power(PM_delta - previous_PM_delta_median, 2) )
 
 
-def check_if_using_custom_limits_for_mags(args)->None:
-    if args.set_limits:
-        print(f"{sb_v2} {colors['GREEN']}Using custom mag limits: {colors['BLUE']}[{args.mag_lower_limit}, {args.mag_upper_limit}]{colors['NC']}")
-        return
-    return
-
 def check_min_and_max_values(minValue: float, maxValue: float, useCustomLimits: bool,
                              lower_mag: float, upper_mag: float,
                              default_lower_mag: float =10.5, default_upper_mag: float =19.5)->(float, float):
@@ -2464,7 +2464,7 @@ def get_and_check_created_bins(args, astrodata: Table, ellipse_center: ellipseVP
         if n_divisions_for_bins < 2:
             p.failure(f"{colors['RED']}Was not possible to create bins{colors['NC']}")
             sys.exit(1)
-    if not args.no_print_table_bins:
+    if not args.no_print_bins:
         print_values_bins(maxVal, minVal, n_divisions_for_bins, binVal, totalCustomBins, mag_filter_name)
     setattr(args, 'n_divisions', n_divisions_for_bins)
     return totalCustomBins
@@ -2674,7 +2674,13 @@ def do_interpolation(args, totalBins, dataToFilter, varToInterpolate, sigma, ell
 
 def do_and_print_interpolation(args, totalBins: TotalBins, preData: Table, len_originalData: int,
                                varToInterpolate: str, sigma: float, ellipse_center: ellipseVPDCenter):
-    print(f"Interpolating '{varToInterpolate}' parameter for a value of {sigma} σ...")
+    if varToInterpolate.lower() == "mu_r":
+        var_to_print = "μ_R"
+    if varToInterpolate.lower == "astrometric_gof_al" or varToInterpolate.lower() == "as_gof_al":
+        var_to_print = "as_gof_al"
+    if varToInterpolate.lower() == "parallax":
+        var_to_print = "parallax"
+    print(f"{sb} {colors['PURPLE']}Interpolating '{var_to_print}' parameter for a value of {sigma} σ...{colors['NC']}")
     if varToInterpolate != "parallax":
         data_filtered_by_param, points_separating_param = do_interpolation(args, totalBins=totalBins,
                                                                           dataToFilter=preData,
@@ -2687,13 +2693,10 @@ def do_and_print_interpolation(args, totalBins: TotalBins, preData: Table, len_o
                                                                              varToInterpolate=varToInterpolate,    
                                                                              sigma=sigma,
                                                                              ellipse_center=ellipse_center)
-    print_n_times=70
-    print("#"*print_n_times)
-    print(f"Original data length (N): {len_originalData}")
-    print(f"Modified data length (N): {len(data_filtered_by_param)}")
-    print("Data filtered/discarded:", end = " ")
-    print(f"{round(((len_originalData-len(data_filtered_by_param))/(1.0*len_originalData))*100,2)}%")
-    print("#"*print_n_times)
+    print(f"    {colors['BROWN']}-> {colors['CYAN']}Data size before filtering: {len_originalData}{colors['NC']}")
+    print(f"    {colors['BROWN']}-> {colors['GREEN']}Data size after filtering: {len(data_filtered_by_param)}{colors['NC']}")
+    print(f"    {colors['BROWN']}-> {colors['RED']}Data discarded:", end = " ")
+    print(f"{round(((len_originalData-len(data_filtered_by_param))/(1.0*len_originalData))*100,2)}%{colors['NC']}")
     if varToInterpolate != 'parallax':
         return data_filtered_by_param, points_separating_param
     else: 
@@ -2845,10 +2848,10 @@ def get_pmra_based_on_object_identification(args, obj_name, original_data:Table 
     # If they do, it means that the user has not provided arguments for '--pmra' or '--pmdec'
     # and the user will have to explicitly provide them since the program could not get them automatically
     if object_info.identifiedAs == "GlobularCluster":
-        print(f"{sb} {colors['BLUE']} Object found in Archives. Using values from: {colors['PURPLE']}Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
+        print(f"{sb} {colors['BLUE']}Object found in Archives. Using values from: {colors['PURPLE']}Vasiliev & Baumgardt (2021, MNRAS, 505, 5978V){colors['NC']}")
         pmra, pmdec = object_info.pmra, object_info.pmdec
     if object_info.identifiedAs == "OpenCluster":
-        print(f"{sb} {colors['BLUE']} Object found in Archives. Using values from: {colors['PURPLE']}Cantat-Gaudin et al. (2020, A&A, 640, A1){colors['NC']}")
+        print(f"{sb} {colors['BLUE']}Object found in Archives. Using values from: {colors['PURPLE']}Cantat-Gaudin et al. (2020, A&A, 640, A1){colors['NC']}")
         pmra, pmdec = object_info.pmra, object_info.pmdec
     if object_info.identifiedAs == "Other":
         print(f"{sb} {colors['BLUE']}Using median values obtained from data for 'pmra' and 'pmdec'{colors['NC']}")
@@ -2860,12 +2863,33 @@ def get_pmra_based_on_object_identification(args, obj_name, original_data:Table 
     return ellipseCenter, identified
 
 
+def check_arguments_provided_for_Cordoni_algorithm(args)->None:
+    # Check if the number of iterations provided by the user is valid.
+    if args.n_iterations <= 0:
+        print(f"{warning} {colors['RED']} Invalid number of iterations given: {args.n_iterations}. Value must be a positive number...{colors['NC']}")
+        sys.exit(1)
+    # User cannot disable 3 filters applied by Cordoni algorithm. If so, exit the program...
+    if args.no_as_gof_al and args.no_mu_R and args.no_parallax:
+        print(f"{warning} {colors['RED']} You do not want to apply any filter to data. Are you sure?{colors['NC']}")
+        print(f"    {colors['RED']} '--no-as-gof-al', '--no-mu-R' and '--no-parallax' simoutaneously enabled{colors['NC']}")
+        sys.exit(1)
+    # Check if the user is using custom limits
+    if args.set_limits:
+        print(f"{sb_v2} {colors['GREEN']}Using custom mag limits: {colors['BLUE']}[{args.mag_lower_limit}, {args.mag_upper_limit}]{colors['NC']}")
+    # Lower limit cannot be a bigger upper limit
+    if args.mag_lower_limit >= args.mag_upper_limit:
+        print(f"{warning}{colors['RED']} Lower limit magnitude ({args.mag_lower_limit}) must be bigger than upper limit magnitude ({args.mag_upper_limit})...{colors['NC']}")
+        sys.exit(1)
+    # Check if the user wants to show all the plots but at the same time hide all of them:
+    if args.show_all_plots and args.no_plot_mu_R and args.no_plot_as_gof_al and args.no_plot_parallax:
+        print(f"{warning} {colors['RED']}...so you want to show all the plots but at the same time hide all of them?{colors['NC']}")
+        print(f"    {colors['RED']} '--show-all-plots', '--no-plot-as-gof-al', '--no-plot-mu-R' and '--no-plot-parallax' simoutaneously enabled{colors['NC']}")
+        sys.exit(1)
+    return
+
+
 def Cordoni_algorithm(args, object_name: str, totalBins: TotalBins, original_data: Table, 
                       iteration_number: int, ellipse_center: ellipseVPDCenter):
-    print_n_times = 70
-    print("="*print_n_times)
-    print(f"Iteration #{iteration_number}")
-    print_n_times = 70
     # Create a deep copy of the original data
     data_filtered = copy.deepcopy(original_data)
     if not args.no_as_gof_al:
@@ -2873,50 +2897,53 @@ def Cordoni_algorithm(args, object_name: str, totalBins: TotalBins, original_dat
         data_filtered, points_to_plot = do_and_print_interpolation(args, totalBins, data_filtered, len(data_filtered),
                                                                    'astrometric_gof_al', args.sigma, ellipse_center)
         data_filtered = copy.deepcopy(data_filtered)
-        # If we are in the first iteration, show a plot showing original and filtered data
-        if (iteration_number == 1 and not args.no_plot_as_gof_al) or (iteration_number == 2 and not args.no_plot_as_gof_al):
-            # Plot in 'dark mode'
-            if args.plot_dark_mode:
-                with plt.style.context("dark_background"):
-                    plot_interpolation(args, object_name, data_filtered, original_data, ellipse_center,
-                                       points_to_plot, "astrometric_gof_al", "astrometric_gof_al")
-            # Plot in 'light mode' (default)
-            else:
-                with plt.style.context("default"):
-                    plot_interpolation(args, object_name, data_filtered, original_data, ellipse_center,
-                                       points_to_plot, "astrometric_gof_al", "astrometric_gof_al")
+        if not args.no_plot_as_gof_al:
+            # If we are in the first iteration, show a plot showing original and filtered data
+            if iteration_number == 1 or args.show_all_plots:
+                # Plot in 'dark mode'
+                if args.plot_dark_mode:
+                    with plt.style.context("dark_background"):
+                        plot_interpolation(args, object_name, data_filtered, original_data, ellipse_center,
+                                           points_to_plot, "astrometric_gof_al", "astrometric_gof_al")
+                # Plot in 'light mode' (default)
+                else:
+                    with plt.style.context("default"):
+                        plot_interpolation(args, object_name, data_filtered, original_data, ellipse_center,
+                                           points_to_plot, "astrometric_gof_al", "astrometric_gof_al")
     if not args.no_mu_R:
         pre_filter_data = copy.deepcopy(data_filtered)
         data_filtered, points_to_plot = do_and_print_interpolation(args, totalBins, data_filtered, len(data_filtered),
                                                                    'mu_R', args.sigma, ellipse_center)
         data_filtered = copy.deepcopy(data_filtered)
-        if (iteration_number == 1 and not args.no_plot_mu_R) or (iteration_number == 2 and not args.no_plot_mu_R):
-            # Plot in 'dark mode'
-            if args.plot_dark_mode:
-                with plt.style.context("dark_background"):
-                    plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center,
-                                       points_to_plot, 'mu_R', r"$\mu_{\rm R}$ $({\rm mas}\cdot{\rm yr})^{-1}$")
-            # Plot in 'light mode' (default)
-            else:
-                with plt.style.context("default"):
-                    plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center,
-                                       points_to_plot, 'mu_R', r"$\mu_{\rm R}$ $({\rm mas}\cdot{\rm yr})^{-1}$")
+        if not args.no_plot_mu_R:
+            if iteration_number == 1 or args.show_all_plots:
+                # Plot in 'dark mode'
+                if args.plot_dark_mode:
+                    with plt.style.context("dark_background"):
+                        plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center,
+                                           points_to_plot, 'mu_R', r"$\mu_{\rm R}$ $({\rm mas}\cdot{\rm yr})^{-1}$")
+                # Plot in 'light mode' (default)
+                else:
+                    with plt.style.context("default"):
+                        plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center,
+                                           points_to_plot, 'mu_R', r"$\mu_{\rm R}$ $({\rm mas}\cdot{\rm yr})^{-1}$")
 
     if not args.no_parallax:
         pre_filter_data = copy.deepcopy(data_filtered)
         data_filtered, points_right, points_left = do_and_print_interpolation(args, totalBins, data_filtered, len(data_filtered),
                                                                               'parallax', args.sigma, ellipse_center)
-        if (iteration_number == 1 and not args.no_plot_parallax) or (iteration_number == 2 and not args.no_plot_parallax):
-            # Plot in 'dark mode'
-            if args.plot_dark_mode:
-                with plt.style.context("dark_background"):
-                    plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center, points_right,
-                                       'parallax', r"$\pi$ $({\rm mas})$", points_data_left=points_left)
-            # Plot in 'light mode' (default)
-            else:
-                with plt.style.context("default"):
-                    plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center,
-                                       points_right, 'parallax', r"$\pi$ $({\rm mas})$", points_data_left=points_left)
+        if not args.no_plot_parallax:
+            if iteration_number == 1 or args.show_all_plots:
+                # Plot in 'dark mode'
+                if args.plot_dark_mode:
+                    with plt.style.context("dark_background"):
+                        plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center, points_right,
+                                           'parallax', r"$\pi$ $({\rm mas})$", points_data_left=points_left)
+                # Plot in 'light mode' (default)
+                else:
+                    with plt.style.context("default"):
+                        plot_interpolation(args, object_name, data_filtered, pre_filter_data, ellipse_center,
+                                           points_right, 'parallax', r"$\pi$ $({\rm mas})$", points_data_left=points_left)
         
     return data_filtered
 
@@ -2931,14 +2958,12 @@ def recycle_center_ellipse(identified: str)->bool:
 
 
 def extractCordoniData(args, subcommand, subsubcommand):
+    # Check parameters provided by the user
+    check_arguments_provided_for_Cordoni_algorithm(args)
     # Check if the Gaia filter provided by the user is valid
     # Only allowed values are: {G, G_RP, G_RP}
     # If this function does not exit then the user has provided a valid Gaia filter
     _ = get_mag_filter_name(args.set_mag_filter)
-    # Check if the number of iterations provided by the user is valid.
-    if args.n_iterations <= 0:
-        print(f"{warning} {colors['RED']} Invalid number of iterations given: {args.n_iterations}. Value must be a positive number...{colors['NC']}")
-        sys.exit(1)
     # Get the original data from file. Since the file is required 'object_info' (the second variable returned) will always be "None" variable
     original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
     # Get the name of the object name based on the filename provided
@@ -2949,24 +2974,34 @@ def extractCordoniData(args, subcommand, subsubcommand):
     obj_name = get_filename_in_list(filename_original_without_extension)
     # Recycle ellipse found (explained below)
     recycleCenterEllipse = False
-    # Get the coordinates for ellipse center
-    #centerEllipse, identified = get_pmra_pmdec_for_VPD(args, obj_name, original_data=data_to_work, useMedian=True, fill=True)
-    # Check if the user is using custom limits. If so, print a simple message
-    check_if_using_custom_limits_for_mags(args)
-    
+    # Start applying Cordoni et al. (2018) algorithm to data over iterations
+    p = log.progress(f"{colors['PURPLE']}Data{colors['NC']}")
     for iterator in range(1, args.n_iterations+1):
+        p.status(f"{colors['GREEN']}Filtering data ({colors['PURPLE']}{iterator}/{args.n_iterations}{colors['GREEN']}){colors['NC']}")
+        cordoni_text_to_show = f"Iteration #{iterator}"
+        displaySections(cordoni_text_to_show, color_chosen=randomColor(), character='#', c=randomColor())
         if iterator == 1:
+            # If we are in the first cycle, we must use the original data
             data_to_work = copy.deepcopy(original_data)
             centerEllipse, identified = get_pmra_based_on_object_identification(args, obj_name, data_to_work)
+            # If the ellipse is a Globular Cluster or Open Cluster, then we can recycle the center of the ellipse
+            # But if the data is a ustom object, we will need to re-compute the data ellipse center
             recycleCenterEllipse = recycle_center_ellipse(identified)
         if iterator != 1:
+            # If we are in a different cycle than the first one, use the data filtered in previous steps
             data_to_work = copy.deepcopy(filtered_data)
-        if iterator != 1 and not recycleCenterEllipse:
+        # Re-compute the ellipse center if the data is found as "Other" or if the user wants to re-compute it...
+        if (iterator != 1 and not recycleCenterEllipse) or args.re_compute_ellipse_center:
             if iterator != 1:
-                print(f"{sb} {colors['GREEN']} Re-computing ellipse center...{colors['NC']}")
+                print(f"{sb} {colors['GREEN']}Re-computing ellipse center...{colors['NC']}")
+                print(f"    {sb_v2} {colors['CYAN']}Old Center Coords (pmra, pmdec) (mas/yr): {colors['RED']}({centerEllipse.pmra}, {centerEllipse.pmdec}){colors['NC']}")
             centerEllipse = get_median_pmra_pmdec(data_to_work)
+            if iterator != 1:
+                print(f"    {sb_v2} {colors['CYAN']}New Center Coords (pmra, pmdec) (mas/yr): {colors['PURPLE']}({centerEllipse.pmra}, {centerEllipse.pmdec}){colors['NC']}")
         totalCustomBins = get_and_check_created_bins(args, astrodata=data_to_work, ellipse_center=centerEllipse)
         filtered_data = Cordoni_algorithm(args, obj_name, totalCustomBins, data_to_work, iterator, centerEllipse)
+    p.success(f"{colors['CYAN']} Cordoni algorithm succesfully applied to data{colors['NC']}")
+    print_before_and_after_filter_length(len(original_data), len(filtered_data))
     p = log.progress(f"{colors['PINK']}Saving data{colors['NC']}")
     # If the user provided a file, try to obtain the "identifiedAs" parameter based on its path
     object_info_identified = decide_parameters_to_save_data(args, object_info)
