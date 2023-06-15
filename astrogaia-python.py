@@ -1017,7 +1017,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data succesfully found and extracted from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']}Data succesfully found and extracted from {colors['PURPLE']}{vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
             # There is, literally, 1 line with an alternative name with only 1 component '1636-283'
@@ -1048,7 +1048,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']}Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']}Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {colors['PURPLE']}{vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
         
@@ -1082,7 +1082,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']}Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {colors['PURPLE']}{vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
                 
 
@@ -1112,7 +1112,7 @@ def get_extra_object_info_globular_cluster(args, p):
                                                        e_parallax=vasiliev_e_parallax,
                                                        rscale=vasiliev_rscale,
                                                        nstar=vasiliev_nstar)
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {vasiliev_baumgardt_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']}Data found as {colors['RED']}Globular Cluster{colors['GREEN']} from {colors['PURPLE']}{vasiliev_baumgardt_study.show_study()} {colors['NC']}")
                 return True, vasiliev_object
 
     if response.status_code != 200:
@@ -1229,7 +1229,7 @@ def get_extra_object_info_open_cluster(args, p, set_warning=True):
                                                    distance=distance,
                                                    rgc=rgc)
 
-                p.success(f"{colors['GREEN']} Data found as {colors['RED']}Open Cluster{colors['GREEN']} from {cantat_gaudin_study.show_study()} {colors['NC']}")
+                p.success(f"{colors['GREEN']}Data found as {colors['RED']}Open Cluster{colors['GREEN']} from {colors['PURPLE']}{cantat_gaudin_study.show_study()} {colors['NC']}")
                 return True, cantat_object
     if response.status_code != 200:
         p.failure(f"{colors['RED']}Unable to reach the data source website ('{cantat_gaudin_study.data_url}'). Check your internet connection and retry.{colors['NC']}")
