@@ -2977,7 +2977,7 @@ def extractCordoniData(args, subcommand, subsubcommand):
     # Start applying Cordoni et al. (2018) algorithm to data over iterations
     p = log.progress(f"{colors['PURPLE']}Data{colors['NC']}")
     for iterator in range(1, args.n_iterations+1):
-        p.status(f"{colors['GREEN']}Filtering data ({colors['PURPLE']}{iterator}/{args.n_iterations}{colors['GREEN']}){colors['NC']}")
+        p.status(f"{colors['GREEN']}Filtering data using {colors['RED']}Cordoni et al. (2018, ApJ, 869, 139C) {colors['GREEN']}({colors['PURPLE']}{iterator}/{args.n_iterations}{colors['GREEN']}){colors['NC']}")
         cordoni_text_to_show = f"Iteration #{iterator}"
         displaySections(cordoni_text_to_show, color_chosen=randomColor(), character='#', c=randomColor())
         if iterator == 1:
