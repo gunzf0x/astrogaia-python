@@ -28,8 +28,6 @@ from pathlib import Path
 import signal
 import copy
 import numpy as np
-from numpy import ones
-from numpy.linalg import lstsq
 from tqdm import tqdm
 import warnings
 
@@ -2346,7 +2344,7 @@ def check_if_total_bins_has_at_least_2_elems_or_more(totalBins: TotalBins, filte
             sys.exit(1)
         # Check the length of 2 parameters
         if len(bin_it.params.as_gof_al) < minimum_per_bin:
-            print(f"{warning}{colors['RED']} Bin #{index+1} has {len(bin_it.median_as_gof_al)}{colors['NC']}")
+            print(f"{warning}{colors['RED']} Bin #{index+1} has {len(bin_it.params.as_gof_al)}{colors['NC']}")
             print(f"    {colors['RED']}At least 2 elements are required per bin")
             return False
         if len(params_data_median_mag) < minimum_per_bin:
@@ -2459,8 +2457,8 @@ def eq_straight_line(P1, P2: euclidianPoint) -> (float, float):
     "Return the equation of a straight line given two points with coordinates P1 = (x1, y1) and P2 = (x2,y2)"
     points = [(P1.x, P1.y),(P2.x, P2.y)]
     x_coords, y_coords = zip(*points)
-    A = np.vstack([x_coords,ones(len(x_coords))]).T
-    m, c = lstsq(A, y_coords, rcond=None)[0]
+    A = np.vstack([x_coords, np.ones(len(x_coords))]).T
+    m, c = np.linalg.lstsq(A, y_coords, rcond=None)[0]
     # print("Line Solution is y = {m}x + {c}".format(m=m,c=c))
     return m, c
 
@@ -2571,24 +2569,36 @@ def create_points_to_interpolate(args, totalBins: TotalBins, varToInterpolate: s
     return points
 
 
-def interpolate_data_var(usefulData: parameterList, data_to_interpolate:Table, interPoints: pointsToInterpolate,
-                         variableName: str,sigma: float, interPoints2: pointsToInterpolate = None) -> np.ndarray:
+def interpolate_data_var(args, usefulData: parameterList, data_to_interpolate:Table, interPoints: pointsToInterpolate,
+                         variableName: str,sigma: float, interPoints2: pointsToInterpolate = None)->np.ndarray:
     mask_array = []
     notfound=0
     parameter_to_get_list = which_parameter(parameters_in_list=usefulData,paramName=variableName)
-    for j in range(0, len(usefulData.G_RP)):
-        G_RP = usefulData.G_RP[j]
+    filter_name = get_mag_filter_name(args.set_mag_filter)
+    gaia_key_mag = select_gaia_filter_key_param(filter_name) 
+    if filter_name == "G_RP":
+        useful_mag = usefulData.G_RP
+    elif filter_name == "G_BP":
+        useful_mag = usefulData.G_BP
+    elif filter_name == "G":
+        useful_mag = usefulData.G
+    else:
+        print(f"{warning} {colors['RED']}Invalid 'filter_name' in 'interpolate_data_var' (value given: '{filter_name}'){colors['NC']}")
+        sys.exit(1)
+
+    for j in range(0, len(useful_mag)):
+        mag_iteration = useful_mag[j]
         parameterToCompare = parameter_to_get_list[j]
         for index in range (0, len(interPoints.points)-1):
-            lower_G_RP = interPoints.points[index].mag_median
-            upper_G_RP = interPoints.points[index+1].mag_median
-            isInRange = lower_G_RP <= G_RP < upper_G_RP
+            lower_mag = interPoints.points[index].mag_median
+            upper_mag = interPoints.points[index+1].mag_median
+            isInRange = lower_mag <= mag_iteration < upper_mag
             if isInRange:
                 median_val = interPoints.points[index].median_value
                 std_val = interPoints.points[index].std_value
                 m_val = interPoints.points[index].m
                 c_val = interPoints.points[index].c
-                evaluate_value = m_val * G_RP + c_val
+                evaluate_value = m_val * mag_iteration + c_val
                 # This will not be 'None' for "parallax" parameter
                 if interPoints2 != None:
                     median_val2 = interPoints2.points[index].median_value
@@ -2596,7 +2606,7 @@ def interpolate_data_var(usefulData: parameterList, data_to_interpolate:Table, i
                     m_val2 = interPoints2.points[index].m
                     c_val2 = interPoints2.points[index].c
                     if index != 0:
-                        evaluate_value2 = m_val2 * G_RP + c_val2
+                        evaluate_value2 = m_val2 * mag_iteration + c_val2
                     else:
                         evaluate_value2 = median_val2 - sigma * std_val2
                         
@@ -2617,15 +2627,12 @@ def interpolate_data_var(usefulData: parameterList, data_to_interpolate:Table, i
                 notfound+=1
                 mask_array.append(True)
             
-    checkLengths = len(mask_array) == len(data_to_interpolate['phot_rp_mean_mag'])
+    checkLengths = len(mask_array) == len(data_to_interpolate[gaia_key_mag])
     if not checkLengths:
-        print("Mask length and data length are not equal!")
-        print(f"Mask length: {len(mask_array)}")
-        print(f"{len(data_to_interpolate['phot_rp_mean_mag'])}")
+        print(f"{warning} {colors['RED']}Mask length and data length are not equal!{colors['NC']}")
+        print(f"    {colors['RED']}Mask length: {len(mask_array)}{colors['NC']}")
+        print(f"    {colors['RED']}{len(data_to_interpolate[gaia_key_mag])}{colors['NC']}")
         sys.exit(1)
-    # This error can happen if the upper limit, when defining bias,
-    # is not the same as the 'faint_limit' in 1st step of Notebook
-    # assert checkLengths, "Mask length and data length are not equal!"
     return  np.asarray(mask_array)
 
 
@@ -2633,14 +2640,14 @@ def do_interpolation(args, totalBins, dataToFilter, varToInterpolate, sigma, ell
     usefulParameters = get_important_parameters(original_data=dataToFilter, ellipse_center=ellipse_center)
     if varToInterpolate != 'parallax':
         points_to_interpolate = create_points_to_interpolate(args, totalBins=totalBins, varToInterpolate=varToInterpolate, sigma=sigma)
-        interpolated_stars = interpolate_data_var(usefulParameters, dataToFilter, points_to_interpolate, varToInterpolate, args.sigma)
+        interpolated_stars = interpolate_data_var(args, usefulParameters, dataToFilter, points_to_interpolate, varToInterpolate, args.sigma)
         data_filtered = dataToFilter[interpolated_stars]
         return data_filtered, points_to_interpolate
         
     if varToInterpolate == 'parallax':
         points_to_interpolate_right = create_points_to_interpolate(args, totalBins=totalBins, varToInterpolate=varToInterpolate, sigma=sigma)
         points_to_interpolate_left = create_points_to_interpolate(args, totalBins=totalBins, varToInterpolate=varToInterpolate, sigma= -1.0*sigma)
-        interpolated_stars = interpolate_data_var(usefulParameters, dataToFilter, points_to_interpolate_right, varToInterpolate, sigma=sigma,
+        interpolated_stars = interpolate_data_var(args, usefulParameters, dataToFilter, points_to_interpolate_right, varToInterpolate, sigma=sigma,
                                                   interPoints2=points_to_interpolate_left)
         data_filtered = dataToFilter[interpolated_stars]
         return data_filtered, points_to_interpolate_left, points_to_interpolate_right
