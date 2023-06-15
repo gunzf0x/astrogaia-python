@@ -2668,7 +2668,7 @@ def do_and_print_interpolation(args, totalBins: TotalBins, preData: Table, len_o
                                varToInterpolate: str, sigma: float, ellipse_center: ellipseVPDCenter):
     if varToInterpolate.lower() == "mu_r":
         var_to_print = "μ_R"
-    if varToInterpolate.lower == "astrometric_gof_al" or varToInterpolate.lower() == "as_gof_al":
+    if varToInterpolate.lower() == "astrometric_gof_al" or varToInterpolate.lower() == "as_gof_al":
         var_to_print = "as_gof_al"
     if varToInterpolate.lower() == "parallax":
         var_to_print = "parallax"
