@@ -53,6 +53,7 @@ colors = {
         }
 script_version = 'v1.0.0'
 
+
 # Define simple characters
 sb: str = f'{colors["L_CYAN"]}[{colors["YELLOW"]}*{colors["L_CYAN"]}]{colors["NC"]}' # [*]
 sb_v2: str = f'{colors["RED"]}[{colors["YELLOW"]}+{colors["RED"]}]{colors["NC"]}' # [*]
@@ -69,10 +70,12 @@ def signal_handler(signal, frame):
 # Redirect the signal handler to trigger Ctrl-C custom function
 signal.signal(signal.SIGINT, signal_handler)
 
+
 # Filter warnings thrown by numpy
 # Since not always all the magnitudes will be measured for all the filters, this will throw a warning when
 # when attempting to pass them as an array
 warnings.filterwarnings('ignore')
+
 
 # Get user flags
 def parseArgs():
@@ -365,10 +368,6 @@ def parseArgs():
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--force-create-directory', action="store_false", help='Forces (do not ask) creating a folder where all data output will be stored')
     extract_subcommand_filter_subsubcommand_cordoni.add_argument('--force-overwrite-outfile', action="store_true", help='Forces overwriting/replace old file without asking to the user')
 
-
-
-
-
     ### 'plot' command
     str_plot_command: str = 'plot'
     plot_command = commands.add_parser(str_plot_command, help=f"{colors['GREEN']}Plot data{colors['NC']}")
@@ -392,8 +391,6 @@ def parseArgs():
     plot_subcommand_filter = parser_subcommand_plot.add_parser(str_plot_subcommand_filter, 
                                                                help=f"Plot data from a file containing Gaia data")
     plot_subcommand_filter.add_argument("-n", "--name", help="Set a object name for the sample. Example: 'NGC104', 'my_sample'")
-
-
     ### 'show-gaia-content' command
     str_show_content_command: str = 'show-gaia-content'
     show_content_command =  commands.add_parser(str_show_content_command, 
@@ -403,10 +400,8 @@ def parseArgs():
                                             Valid options: {gdr3, gaiadr3, g3dr3, gaia3dr3, gdr2, gaiadr2}")
     show_content_command.add_argument('-t', '--table-format', default='grid', 
                                       help="Table display format (default='grid'). To check all formats available visit: https://pypi.org/project/tabulate/")
-    
     # parse the command-line arguments
     args = parser.parse_args()
-
     return parser, args
 
 
@@ -470,8 +465,6 @@ def printBanner() -> None:
     sh2 = f'\033[{rand_number2}m' # shadow
     rand_number3 = random.randint(31,36) 
     c3 = f'\033[1;{rand_number3}m' # color
-
-
     banner = rf'''   {c}_____            __{nc}                  
  {c} /  {sh}_  {c}\   _______/  |________  ____{nc}  
 {c} /  {sh}/_\  {c}\ /  ___/\   __\_  __ \/  {sh}_ {c}\{nc}  
@@ -490,6 +483,7 @@ def printBanner() -> None:
     print(f"{' ' * 6}{c3} P. Universidad Católica de Chile{nc}")
     print(f"{' ' * 21}{c3}(ffcarrasco@uc.cl){nc}\n")
     return
+
 
 def randomColor() -> str:
     """
@@ -1153,8 +1147,6 @@ class onlineCantanObject:
     distance: float # pc
     rgc : float # distance from galaxy center, assuming the distance is 8340 pc (pc)
 
-
-
     
 def get_extra_object_info_open_cluster(args, p, set_warning=True):
     """
@@ -1245,6 +1237,7 @@ def get_extra_object_info_open_cluster(args, p, set_warning=True):
         return False, None
     p.failure(f" {colors['RED']}Could not find online data available for '{args.name}' object. Continuing...")
     return False, None
+
 
 def decide_units_parameter(value, units):
     """
@@ -1607,7 +1600,6 @@ def save_data_output(args, command, mode, object_info, data):
 class ellipseVPDCenter():
     pmra: float
     pmdec: float
-
 
 
 def get_pmra_pmdec_for_VPD(args, obj_name, original_data:Table | None = None, useMedian=False, fill=False)->(ellipseVPDCenter, str):
@@ -3146,10 +3138,6 @@ def extractCommand(args)->None:
         if args.subsubcommand == "cordoni":
             filtered_data = extractCordoniData(args, 'filter', 'cordoni')
             sys.exit(0)
-
-
- 
-
 
 
 ####################
