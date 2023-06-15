@@ -2030,18 +2030,18 @@ def apply_filter_to_data_with_parameters(args, data):
     # Make a deepcopy, so we do not modify the original data
     copy_original_data = copy.deepcopy(data)
     if not args.no_filter_ruwe:
-        p.status(f"{colors['GREEN']}Filtering data by RUWE (smaller than {args.filter_by_ruwe})...{colors['NC']}")
+        print(f"    {colors['BROWN']}-> {colors['GREEN']}Filtering data by RUWE (smaller than {args.filter_by_ruwe})...{colors['NC']}")
         copy_original_data = filter_data_with_parameter(copy_original_data, 'ruwe', p, max_value=args.filter_by_ruwe)
     if not args.no_filter_pm_error:
-        p.status(f"{colors['GREEN']}Filtering data by Proper Motion errors (smaller than {args.filter_by_pm_error} mas/yr)...{colors['NC']}")
+        print(f"    {colors['BROWN']}-> {colors['GREEN']}Filtering data by Proper Motion errors (smaller than {args.filter_by_pm_error} mas/yr)...{colors['NC']}")
         copy_original_data = filter_data_with_parameter(copy_original_data, 'pmra_error', p, max_value=args.filter_by_pm_error)
         copy_original_data = filter_data_with_parameter(copy_original_data, 'pmdec_error', p, max_value=args.filter_by_pm_error)
     if not args.no_filter_g_rp:
-        p.status(f"{colors['GREEN']}Filtering data by G_RP magnitude ({args.filter_by_g_rp_min} < G_RP/mag < {args.filter_by_g_rp_max})...{colors['NC']}")
+        print(f"    {colors['BROWN']}-> {colors['GREEN']}Filtering data by G_RP magnitude ({args.filter_by_g_rp_min} < G_RP/mag < {args.filter_by_g_rp_max})...{colors['NC']}")
         copy_original_data = filter_data_with_parameter(copy_original_data, 'phot_rp_mean_mag', p, 
                                                         max_value=args.filter_by_g_rp_max, 
                                                         min_value=args.filter_by_g_rp_min)
-    p.success("Data fully filtered")
+    p.success("Data fully filtered by parameters")
     return copy_original_data
 
 
@@ -3067,6 +3067,7 @@ def extractFilterParameters(args, subcommand: str, subsubcommand: str):
     original_data, object_info = get_data_from_file_or_query(args, subcommand, subsubcommand)
     original_length = len(original_data)
     filtered_data = apply_filter_to_data_with_parameters(args, original_data)
+    print_before_and_after_filter_length(original_length, len(filtered_data))
     p = log.progress(f"{colors['PINK']}Saving data{colors['NC']}")
     # If the user provided a file, try to obtain the "identifiedAs" parameter based on its path
     object_info_identified = decide_parameters_to_save_data(args, object_info)
@@ -3076,7 +3077,6 @@ def extractFilterParameters(args, subcommand: str, subsubcommand: str):
         p.success(f"{colors['GREEN']}Data succesfully saved{colors['NC']}")
     else:
         p.failure(f"{colors['RED']}Data has not been saved{colors['NC']}")
-    print_before_and_after_filter_length(original_length, len(filtered_data))
     return filtered_data
 
 
