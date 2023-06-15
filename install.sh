@@ -162,10 +162,6 @@ main() {
   pip3 install --upgrade pip
   pip3 install -r requirements.txt
   
-  # Try to instal 'python3-tk' since it is needed to display plots
-  echo "[+] Attempting to install 'tkinter' to display plots"
-  sudo apt-get install python3-tk
-
   # Once everything has been installed, run the script 
   python3 astrogaia-python.py -h && echo -e "\n\n[+] The script apparently works!" || echo "[-] Something went wrong when running the script"
 
@@ -186,3 +182,8 @@ main() {
 }
 
 main "$@"
+
+
+# KNOWN ISSUES FOR PLOTTING
+# Try to instal 'python3-tk' since it is needed to display plots
+# sudo apt-get install python3-tk
